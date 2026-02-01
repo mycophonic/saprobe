@@ -1,25 +1,25 @@
 # Saprobe
-> * a pure Go audio decoder supporting MP3, FLAC, ALAC, and OggVorbis.
+> * a pure Go audio decoder supporting ALAC, FLAC, DSD (experimental), MP3, WAV, and OggVorbis.
 > * [fungi involved in saprotrophic nutrition, a process of chemoheterotrophic extracellular digestion of organic matter](https://en.wikipedia.org/wiki/Saprobe)
 
 ![Saprobe](logo.jpg)
 
 ## Purpose
 
-Saprobe provides a pure golang library and cli that supports decoding FLAC, ALAC, MP3, OggVorbis and WAV.
+Saprobe provides a pure golang library and cli that supports decoding FLAC, ALAC, DSD, MP3, WAV, and OggVorbis.
 
-Our ALAC implementation is a homegrown port of the Apple library to Go (with some help from github.com/abema/go-mp4
-for container parsing).
+New implementations:
+- ALAC is a from scratch port of the Apple library to Go (with some help from github.com/abema/go-mp4
+for container parsing)
+- MP3 (originally inspired by github.com/hajimehoshi/go-mp3 (Apache))
+- DSD/DFF/DSF
 
-FLAC is provided by, with optimizations (2x faster) and a couple of additional patches on our fork (github.com/mycophonic/flac):
-- github.com/mewkiz/flac (Unlicense)
+Provided by third-party libraries:
+- FLAC (github.com/mewkiz/flac (Unlicense)), with additional optimizations (2x faster) and a couple of additional patches on our fork
+- OggVorbis: github.com/jfreymuth/oggvorbis (MIT)
+- AAC is optionally supported on macOS, but requires CGO if enabled, and just wraps macOS CoreAudio
 
-OggVorbis is provided by:
-- github.com/jfreymuth/oggvorbis (MIT)
-
-MP3 originated at github.com/hajimehoshi/go-mp3 (Apache), which is abandoned, and is now vendored in and modified.
-
-Future roadmap includes DSD, Opus, and AAC.
+Future roadmap includes Opus.
 
 ## Installation
 
@@ -51,10 +51,16 @@ For raw PCM:
 saprobe decode --raw my_audio_file
 ```
 
-## Performance
+## Decoding performance
 
-* FLAC is 2x slower than xyph reference C implementation
-* ALAC is 
+Compared to the reference C implementations (xyph, Apple, lame), saprobe:
+* FLAC is 2.0x slower
+* ALAC is 1.4x slower
+* MP3 is 6.8x slower
+
+Not perf tested:
+* AAC (if compiled in) is provided by macOS, no point in testing
+* OGG (don't have enough of these)
 
 ## Features and support coverage
 

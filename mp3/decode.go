@@ -16,8 +16,12 @@ const (
 	bytesPerSample = 2 // 16-bit
 	bytesPerFrame  = channels * bytesPerSample
 
-	// MP3 frame contains 1152 samples for MPEG1 Layer III.
-	samplesPerFrame = 1152
+	// Samples per granule in Layer III.
+	samplesPerGranule = 576
+
+	// MPEG1 has 2 granules per frame, MPEG2/2.5 has 1.
+	samplesPerFrameMPEG1 = samplesPerGranule * 2 // 1152
+	samplesPerFrameMPEG2 = samplesPerGranule * 1 // 576
 
 	// go-mp3 decoder has additional delay from synthesis filterbank priming.
 	// This is the difference between go-mp3's output and what LAME header expects.
@@ -81,9 +85,10 @@ const (
 
 // gaplessInfo contains encoder delay and padding from LAME header.
 type gaplessInfo struct {
-	delay      int  // samples to skip at start (LAME encoder delay)
-	padding    int  // samples to skip at end (LAME padding)
-	hasXINGTag bool // true if XING/Info frame present (adds samplesPerFrame to output)
+	delay           int  // samples to skip at start (LAME encoder delay)
+	padding         int  // samples to skip at end (LAME padding)
+	hasXINGTag      bool // true if XING/Info frame present (adds decoded samples to output)
+	samplesPerFrame int  // decoded samples per frame: 1152 for MPEG1, 576 for MPEG2/2.5
 }
 
 // Decode reads an MP3 stream and decodes it to interleaved little-endian signed 16-bit PCM bytes.
@@ -140,7 +145,7 @@ func Decode(reader io.ReadSeeker) ([]byte, saprobe.PCMFormat, error) {
 
 // applyGaplessTrimming removes encoder delay from start and padding from end.
 // For go-mp3 decoder, we need to account for:
-// 1. XING/Info frame being decoded as audio (1152 samples) if present
+// 1. XING/Info frame being decoded as audio (1152 MPEG1 / 576 MPEG2 samples) if present
 // 2. go-mp3's synthesis filterbank priming delay (529 samples).
 func applyGaplessTrimming(buf []byte, info gaplessInfo) []byte {
 	if info.delay == 0 && info.padding == 0 && !info.hasXINGTag {
@@ -150,7 +155,7 @@ func applyGaplessTrimming(buf []byte, info gaplessInfo) []byte {
 	// Calculate start trim: LAME delay + decoder delay + XING frame (if present).
 	startSamples := info.delay + decoderDelay
 	if info.hasXINGTag {
-		startSamples += samplesPerFrame
+		startSamples += info.samplesPerFrame
 	}
 
 	// Calculate end trim: LAME padding - decoder delay (decoder delay shifts from end to start).
@@ -215,20 +220,21 @@ func parseGaplessInfo(reader io.ReadSeeker) gaplessInfo {
 
 	// XING/Info frame found - go-mp3 will decode this as audio.
 	hasXING := true
+	spf := frameSamplesPerFrame(frameHeader)
 
 	// Parse XING header to find LAME tag offset.
 	// XING structure: "Xing" (4) + flags (4) + optional fields based on flags.
 	lameOffset := findLAMETag(xingData)
 	if lameOffset < 0 || lameOffset+lameTagMinSize > len(xingData) {
 		// XING present but no LAME tag - still need to skip the XING frame.
-		return gaplessInfo{hasXINGTag: hasXING}
+		return gaplessInfo{hasXINGTag: hasXING, samplesPerFrame: spf}
 	}
 
 	// LAME tag structure: "LAME" (4) + version (5) + ... + gapless info at offset 21-23.
 	// Gapless info: 24 bits = 12-bit delay + 12-bit padding.
 	lameData := xingData[lameOffset:]
 	if len(lameData) < lameTagMinSize {
-		return gaplessInfo{hasXINGTag: hasXING}
+		return gaplessInfo{hasXINGTag: hasXING, samplesPerFrame: spf}
 	}
 
 	// Gapless bytes are at offset 21 from LAME tag start.
@@ -239,9 +245,10 @@ func parseGaplessInfo(reader io.ReadSeeker) gaplessInfo {
 	padding := int(gapless24 & gaplessPaddingMask)
 
 	return gaplessInfo{
-		delay:      delay,
-		padding:    padding,
-		hasXINGTag: hasXING,
+		delay:           delay,
+		padding:         padding,
+		hasXINGTag:      hasXING,
+		samplesPerFrame: spf,
 	}
 }
 
@@ -419,6 +426,19 @@ func findLAMETag(xingData []byte) int {
 	}
 
 	return -1
+}
+
+// frameSamplesPerFrame returns the number of decoded samples per frame
+// based on the MPEG version in the frame header.
+// MPEG1 Layer III: 2 granules × 576 = 1152 samples.
+// MPEG2/2.5 Layer III: 1 granule × 576 = 576 samples.
+func frameSamplesPerFrame(header []byte) int {
+	versionBits := (header[1] >> 3) & 0x03
+	if versionBits == mpegVersion1 {
+		return samplesPerFrameMPEG1
+	}
+
+	return samplesPerFrameMPEG2
 }
 
 // isPrintableASCII checks if all bytes are printable ASCII characters.

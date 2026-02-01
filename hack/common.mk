@@ -66,10 +66,9 @@ lint: lint-commits lint-headers lint-yaml lint-shell
 endif
 
 ifeq ($(HAS_GO),true)
-fix: fix-go-all fix-mod ## Automatically fix some issues
+fix: fix-go-all fix-mod fix-headers ## Automatically fix some issues
 else
-fix: ## Automatically fix some issues
-	@echo "No Go code detected, skipping Go fixes"
+fix: fix-headers ## Automatically fix some issues
 endif
 
 ifeq ($(HAS_GO),true)
@@ -191,6 +190,12 @@ fix-mod:
 	$(call title, $@)
 	@cd $(PROJECT_DIR) \
 		&& go mod tidy
+	$(call footer, $@)
+
+fix-headers:
+	$(call title, $@)
+	@cd $(PROJECT_DIR) \
+		&& ltag -t "./hack/headers" --excludes "bin"
 	$(call footer, $@)
 
 up:
@@ -361,7 +366,7 @@ test-unit-cover: ## Run tests with coverage reporting
 	init-dev init-dev-system \
 	install-dev-tools install-dev-gotestsum \
 	lint-commits lint-go lint-go-all lint-headers lint-licenses lint-licenses-all lint-mod lint-shell lint-vuln lint-yaml \
-	fix-go fix-go-all fix-mod \
+	fix-go fix-go-all fix-headers fix-mod \
 	test-unit test-unit-race test-unit-bench test-unit-cover test-unit-profile \
 	build build-debug build-static install verify clean
 

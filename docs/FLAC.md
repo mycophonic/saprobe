@@ -102,7 +102,7 @@ the reference when both succeed.
 | 07 (15-bit per sample) | Pass | Both succeed, match |
 | 08 (blocksize 65535) | Pass | Both succeed, match |
 | 09 (Rice partition order 15) | Pass | Both succeed, match |
-| 10 (file starting at frame header) | Error | No fLaC signature; saprobe rejects |
+| 10 (file starting at frame header) | Skipped | No fLaC signature; headerless FLAC not supported (see Open Issues) |
 | 11 (unparsable leading data) | Pass | Both decoders fail (acceptable) |
 
 ### Faulty (must not crash)
