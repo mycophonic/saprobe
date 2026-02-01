@@ -21,6 +21,8 @@ import (
 )
 
 func TestBits(t *testing.T) {
+	t.Parallel()
+
 	b1 := byte(85)  // 01010101
 	b2 := byte(170) // 10101010
 	b3 := byte(204) // 11001100

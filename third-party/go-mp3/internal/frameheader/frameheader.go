@@ -58,6 +58,8 @@ func (f FrameHeader) SamplingFrequencyValue() (int, error) {
 		return 48000 >> uint(f.LowSamplingFrequency()), nil
 	case 2:
 		return 32000 >> uint(f.LowSamplingFrequency()), nil
+	case consts.SamplingFrequencyReserved:
+		return 0, errors.New("mp3: frame header has reserved sample frequency")
 	}
 
 	return 0, errors.New("mp3: frame header has invalid sample frequency")
@@ -278,7 +280,7 @@ func (f FrameHeader) NumberOfChannels() int {
 
 // FullReader is an interface for reading complete byte slices.
 type FullReader interface {
-	ReadFull([]byte) (int, error)
+	ReadFull(buf []byte) (int, error)
 }
 
 // Read reads and validates an MPEG frame header from the source.

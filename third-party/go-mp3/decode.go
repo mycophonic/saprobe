@@ -88,7 +88,11 @@ func (d *Decoder) Seek(offset int64, whence int) (int64, error) {
 		return d.pos, nil
 	}
 
-	npos := int64(0)
+	if len(d.frameStarts) == 0 || d.bytesPerFrame == 0 {
+		return 0, errors.New("mp3: seek not available (frame table not built)")
+	}
+
+	var npos int64
 
 	switch whence {
 	case io.SeekStart:
@@ -101,15 +105,36 @@ func (d *Decoder) Seek(offset int64, whence int) (int64, error) {
 		return 0, errors.New("mp3: invalid whence")
 	}
 
+	if npos < 0 {
+		npos = 0
+	}
+
+	if d.length > 0 && npos > d.length {
+		npos = d.length
+	}
+
 	d.pos = npos
 	d.buf = nil
 	d.frame = nil
+
+	// At the very end of the stream there is nothing left to decode.
+	if d.length > 0 && npos >= d.length {
+		return npos, nil
+	}
+
 	frameIdx := d.pos / d.bytesPerFrame
+
+	// Clamp to the last valid frame index.
+	lastFrame := int64(len(d.frameStarts)) - 1
+	if frameIdx > lastFrame {
+		frameIdx = lastFrame
+	}
+
 	// If the frame is not first, read the previous ahead of reading that
 	// because the previous frame can affect the targeted frame.
 	if frameIdx > 0 {
 		frameIdx--
-		if _, err := d.source.Seek(d.frameStarts[frameIdx], 0); err != nil {
+		if _, err := d.source.Seek(d.frameStarts[frameIdx], io.SeekStart); err != nil {
 			return 0, err
 		}
 
@@ -121,9 +146,14 @@ func (d *Decoder) Seek(offset int64, whence int) (int64, error) {
 			return 0, err
 		}
 
-		d.buf = d.buf[d.bytesPerFrame+(d.pos%d.bytesPerFrame):]
+		skip := d.bytesPerFrame + (d.pos % d.bytesPerFrame)
+		if skip > int64(len(d.buf)) {
+			skip = int64(len(d.buf))
+		}
+
+		d.buf = d.buf[skip:]
 	} else {
-		if _, err := d.source.Seek(d.frameStarts[frameIdx], 0); err != nil {
+		if _, err := d.source.Seek(d.frameStarts[frameIdx], io.SeekStart); err != nil {
 			return 0, err
 		}
 
@@ -131,7 +161,12 @@ func (d *Decoder) Seek(offset int64, whence int) (int64, error) {
 			return 0, err
 		}
 
-		d.buf = d.buf[d.pos:]
+		skip := d.pos
+		if skip > int64(len(d.buf)) {
+			skip = int64(len(d.buf))
+		}
+
+		d.buf = d.buf[skip:]
 	}
 
 	return npos, nil

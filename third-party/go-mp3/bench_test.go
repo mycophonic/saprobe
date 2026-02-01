@@ -17,12 +17,12 @@ package mp3
 import (
 	"bytes"
 	"io"
-	"io/ioutil"
+	"os"
 	"testing"
 )
 
 func BenchmarkDecode(b *testing.B) {
-	buf, err := ioutil.ReadFile("example/classic.mp3")
+	buf, err := os.ReadFile("example/classic.mp3")
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -38,7 +38,7 @@ func BenchmarkDecode(b *testing.B) {
 			b.Fatal(err)
 		}
 
-		if _, err := ioutil.ReadAll(d); err != nil {
+		if _, err := io.ReadAll(d); err != nil {
 			b.Fatal(err)
 		}
 	}

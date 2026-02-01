@@ -43,8 +43,7 @@ func readHuffman(
 	// Calculate bitPosEnd which is the index of the last bit for this part.
 	bitPosEnd := part2Start + sideInfo.Part2And3Length[granule][channel] - 1
 	// Determine region boundaries
-	region1Start := 0
-	region2Start := 0
+	var region1Start, region2Start int
 
 	if (sideInfo.WinSwitchFlag[granule][channel] == 1) && (sideInfo.BlockType[granule][channel] == 2) {
 		region1Start = 36                  // sfb[9/3]*3=36
@@ -77,7 +76,7 @@ func readHuffman(
 			return fmt.Errorf("mp3: isPos was too big: %d", isPos)
 		}
 
-		tableNum := 0
+		var tableNum int
 		if isPos < region1Start {
 			tableNum = sideInfo.TableSelect[granule][channel][0]
 		} else if isPos < region2Start {

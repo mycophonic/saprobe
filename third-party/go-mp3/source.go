@@ -115,6 +115,10 @@ func (s *source) ReadFull(buf []byte) (int, error) {
 			s.buf = nil
 		}
 
+		// Advance pos for pushback bytes consumed.
+		// Unread decremented pos; re-consuming those bytes must restore it.
+		s.pos += int64(read)
+
 		if len(buf) == read {
 			return read, nil
 		}

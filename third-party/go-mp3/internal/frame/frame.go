@@ -52,7 +52,7 @@ type Frame struct {
 
 // FullReader is an interface for reading complete byte slices.
 type FullReader interface {
-	ReadFull([]byte) (int, error)
+	ReadFull(buf []byte) (int, error)
 }
 
 func readCRC(source FullReader) error {
@@ -126,7 +126,7 @@ func (f *Frame) Decode() []byte {
 	out := make([]byte, f.header.BytesPerFrame())
 
 	nch := f.header.NumberOfChannels()
-	for gr := 0; gr < f.header.Granules(); gr++ {
+	for gr := range f.header.Granules() {
 		for ch := range nch {
 			f.requantize(gr, ch)
 			f.reorder(gr, ch)
@@ -331,8 +331,7 @@ func (f *Frame) reorder(granule, channel int) {
 var isRatios = []float32{0.000000, 0.267949, 0.577350, 1.000000, 1.732051, 3.732051}
 
 func (f *Frame) stereoProcessIntensityLong(granule, sfb int) {
-	isRatioL := float32(0)
-	isRatioR := float32(0)
+	var isRatioL, isRatioR float32
 	// Check that((isPos[sfb]=scalefac) < 7) => no intensity stereo
 	if isPos := f.mainData.ScalefacL[granule][0][sfb]; isPos < 7 {
 		sfBandIndicesLong, _ := getSfBandIndicesArray(&f.header)
@@ -355,8 +354,7 @@ func (f *Frame) stereoProcessIntensityLong(granule, sfb int) {
 }
 
 func (f *Frame) stereoProcessIntensityShort(granule, sfb int) {
-	isRatioL := float32(0)
-	isRatioR := float32(0)
+	var isRatioL, isRatioR float32
 	_, sfBandIndicesShort := getSfBandIndicesArray(&f.header)
 	// The window length
 	winLen := sfBandIndicesShort[sfb+1] - sfBandIndicesShort[sfb]
@@ -393,7 +391,7 @@ func (f *Frame) stereo(granule int) {
 			i = 0
 		}
 
-		maxPos := int(f.sideInfo.Count1[granule][i])
+		maxPos := f.sideInfo.Count1[granule][i]
 		// Do the actual processing
 		const invSqrt2 = math.Sqrt2 / 2
 		for i := range maxPos {
@@ -483,7 +481,7 @@ func (f *Frame) hybridSynthesis(granule, channel int) {
 	// Loop through all 32 subbands
 	for subband := range 32 {
 		// Determine blocktype for this subband
-		bt := int(f.sideInfo.BlockType[granule][channel])
+		bt := f.sideInfo.BlockType[granule][channel]
 		if (f.sideInfo.WinSwitchFlag[granule][channel] == 1) &&
 			(f.sideInfo.MixedBlockFlag[granule][channel] == 1) && (subband < 2) {
 			bt = 0

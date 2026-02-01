@@ -27,7 +27,7 @@ import (
 
 // FullReader is an interface for reading complete byte slices.
 type FullReader interface {
-	ReadFull([]byte) (int, error)
+	ReadFull(buf []byte) (int, error)
 }
 
 // MainData contains the decoded MPEG Layer 3 main data including scale factors and frequency lines.

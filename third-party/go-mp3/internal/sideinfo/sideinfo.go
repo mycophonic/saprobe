@@ -26,7 +26,7 @@ import (
 
 // FullReader is an interface for reading complete byte slices.
 type FullReader interface {
-	ReadFull([]byte) (int, error)
+	ReadFull(buf []byte) (int, error)
 }
 
 // A SideInfo is MPEG1 Layer 3 Side Information.
@@ -79,12 +79,6 @@ func Read(source FullReader, header frameheader.FrameHeader) (*SideInfo, error) 
 
 	sideInfoSize := header.SideInfoSize()
 
-	// Main data size is the rest of the frame,including ancillary data
-	mainDataSize := framesize - sideInfoSize - 4 // sync+header
-	// CRC is 2 bytes
-	if header.ProtectionBit() == 0 {
-		mainDataSize -= 2
-	}
 	// Read sideinfo from bitstream into buffer used by Bits()
 	buf := make([]byte, sideInfoSize)
 
@@ -122,7 +116,7 @@ func Read(source FullReader, header frameheader.FrameHeader) (*SideInfo, error) 
 		}
 	}
 	// Get the rest of the side information
-	for gr := 0; gr < header.Granules(); gr++ {
+	for gr := range header.Granules() {
 		for channel := range nch {
 			sideInfo.Part2And3Length[gr][channel] = bitReader.Bits(12)
 			sideInfo.BigValues[gr][channel] = bitReader.Bits(9)
