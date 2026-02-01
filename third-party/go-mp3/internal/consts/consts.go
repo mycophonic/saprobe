@@ -60,13 +60,18 @@ const (
 const (
 	SamplesPerGr  = 576
 	GranulesMpeg1 = 2
+	GranulesMpeg2 = 1
 )
 
 // SamplingFrequency represents an MPEG audio sampling frequency index.
 type SamplingFrequency int
 
-// SamplingFrequency constants.
+// SamplingFrequency constants. These are the 2-bit indices stored in
+// the frame header (bits 11-10), not the actual Hz values.
 const (
+	SamplingFrequency44100    SamplingFrequency = 0 // 44100 Hz (MPEG1) / 22050 Hz (MPEG2)
+	SamplingFrequency48000    SamplingFrequency = 1 // 48000 Hz (MPEG1) / 24000 Hz (MPEG2)
+	SamplingFrequency32000    SamplingFrequency = 2 // 32000 Hz (MPEG1) / 16000 Hz (MPEG2)
 	SamplingFrequencyReserved SamplingFrequency = 3
 )
 

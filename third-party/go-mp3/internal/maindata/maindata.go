@@ -119,10 +119,10 @@ func initSlen() (nSlen2 [512]int) {
 // Read reads and parses the main data from an MP3 frame.
 func Read(
 	source FullReader,
-	prev *bits.Bits,
+	prev *bits.Reader,
 	header frameheader.FrameHeader,
 	sideInfo *sideinfo.SideInfo,
-) (*MainData, *bits.Bits, error) {
+) (*MainData, *bits.Reader, error) {
 	nch := header.NumberOfChannels()
 	// Calculate header audio data size
 	framesize, err := header.FrameSize()
@@ -160,10 +160,10 @@ func Read(
 }
 
 func getScaleFactorsMpeg2(
-	bitStream *bits.Bits,
+	bitStream *bits.Reader,
 	header frameheader.FrameHeader,
 	sideInfo *sideinfo.SideInfo,
-) (*MainData, *bits.Bits, error) {
+) (*MainData, *bits.Reader, error) {
 	nch := header.NumberOfChannels()
 
 	mainData := &MainData{}
@@ -192,7 +192,7 @@ func getScaleFactorsMpeg2(
 
 			if num > 0 {
 				for range scalefacSizesMpeg2[blockTypeIdx][d][idx] {
-					scaleFactors = append(scaleFactors, bitStream.Bits(num))
+					scaleFactors = append(scaleFactors, bitStream.ReadBits(num))
 				}
 
 				numbits += scalefacSizesMpeg2[blockTypeIdx][d][idx] * num
@@ -231,10 +231,10 @@ func getScaleFactorsMpeg2(
 
 func getScaleFactorsMpeg1(
 	nch int,
-	bitStream *bits.Bits,
+	bitStream *bits.Reader,
 	header frameheader.FrameHeader,
 	sideInfo *sideinfo.SideInfo,
-) (*MainData, *bits.Bits, error) {
+) (*MainData, *bits.Reader, error) {
 	mainData := &MainData{}
 
 	for granule := range 2 {
@@ -247,7 +247,7 @@ func getScaleFactorsMpeg1(
 			if sideInfo.WinSwitchFlag[granule][channel] == 1 && sideInfo.BlockType[granule][channel] == 2 {
 				if sideInfo.MixedBlockFlag[granule][channel] != 0 {
 					for sfb := range 8 {
-						mainData.ScalefacL[granule][channel][sfb] = bitStream.Bits(slen1)
+						mainData.ScalefacL[granule][channel][sfb] = bitStream.ReadBits(slen1)
 					}
 
 					for sfb := 3; sfb < 12; sfb++ {
@@ -258,7 +258,7 @@ func getScaleFactorsMpeg1(
 						}
 
 						for win := range 3 {
-							mainData.ScalefacS[granule][channel][sfb][win] = bitStream.Bits(nbits)
+							mainData.ScalefacS[granule][channel][sfb][win] = bitStream.ReadBits(nbits)
 						}
 					}
 				} else {
@@ -270,7 +270,7 @@ func getScaleFactorsMpeg1(
 						}
 
 						for win := range 3 {
-							mainData.ScalefacS[granule][channel][sfb][win] = bitStream.Bits(nbits)
+							mainData.ScalefacS[granule][channel][sfb][win] = bitStream.ReadBits(nbits)
 						}
 					}
 				}
@@ -278,7 +278,7 @@ func getScaleFactorsMpeg1(
 				// Scale factor bands 0-5
 				if sideInfo.Scfsi[channel][0] == 0 || granule == 0 {
 					for sfb := range 6 {
-						mainData.ScalefacL[granule][channel][sfb] = bitStream.Bits(slen1)
+						mainData.ScalefacL[granule][channel][sfb] = bitStream.ReadBits(slen1)
 					}
 				} else if sideInfo.Scfsi[channel][0] == 1 && granule == 1 {
 					// Copy scalefactors from granule 0 to granule 1
@@ -290,7 +290,7 @@ func getScaleFactorsMpeg1(
 				// Scale factor bands 6-10
 				if sideInfo.Scfsi[channel][1] == 0 || granule == 0 {
 					for sfb := 6; sfb < 11; sfb++ {
-						mainData.ScalefacL[granule][channel][sfb] = bitStream.Bits(slen1)
+						mainData.ScalefacL[granule][channel][sfb] = bitStream.ReadBits(slen1)
 					}
 				} else if sideInfo.Scfsi[channel][1] == 1 && granule == 1 {
 					// Copy scalefactors from granule 0 to granule 1
@@ -301,7 +301,7 @@ func getScaleFactorsMpeg1(
 				// Scale factor bands 11-15
 				if sideInfo.Scfsi[channel][2] == 0 || granule == 0 {
 					for sfb := 11; sfb < 16; sfb++ {
-						mainData.ScalefacL[granule][channel][sfb] = bitStream.Bits(slen2)
+						mainData.ScalefacL[granule][channel][sfb] = bitStream.ReadBits(slen2)
 					}
 				} else if sideInfo.Scfsi[channel][2] == 1 && granule == 1 {
 					// Copy scalefactors from granule 0 to granule 1
@@ -312,7 +312,7 @@ func getScaleFactorsMpeg1(
 				// Scale factor bands 16-20
 				if sideInfo.Scfsi[channel][3] == 0 || granule == 0 {
 					for sfb := 16; sfb < 21; sfb++ {
-						mainData.ScalefacL[granule][channel][sfb] = bitStream.Bits(slen2)
+						mainData.ScalefacL[granule][channel][sfb] = bitStream.ReadBits(slen2)
 					}
 				} else if sideInfo.Scfsi[channel][3] == 1 && granule == 1 {
 					// Copy scalefactors from granule 0 to granule 1
@@ -331,12 +331,12 @@ func getScaleFactorsMpeg1(
 	return mainData, bitStream, nil
 }
 
-func read(source FullReader, prev *bits.Bits, size, offset int) (*bits.Bits, error) {
+func read(source FullReader, prev *bits.Reader, size, offset int) (*bits.Reader, error) {
 	if size > 1500 {
 		return nil, fmt.Errorf("mp3: size = %d", size)
 	}
 	// Check that there's data available from previous frames if needed
-	if prev != nil && offset > prev.LenInBytes() {
+	if prev != nil && offset > prev.Len() {
 		// No, there is not, so we skip decoding this frame, but we have to
 		// read the main_data bits from the bitstream in case they are needed
 		// for decoding the next frame.
@@ -349,7 +349,7 @@ func read(source FullReader, prev *bits.Bits, size, offset int) (*bits.Bits, err
 			return nil, err
 		}
 		// TODO: Define a special error and enable to continue the next frame.
-		return bits.Append(prev, buf), nil
+		return bits.NewReader(append(prev.Bytes(), buf...)), nil
 	}
 	// Copy data from previous frames
 	vec := []byte{}
@@ -366,5 +366,5 @@ func read(source FullReader, prev *bits.Bits, size, offset int) (*bits.Bits, err
 		return nil, err
 	}
 
-	return bits.New(append(vec, buf...)), nil
+	return bits.NewReader(append(vec, buf...)), nil
 }

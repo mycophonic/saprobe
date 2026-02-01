@@ -52,11 +52,11 @@ func (f FrameHeader) SamplingFrequency() consts.SamplingFrequency {
 // SamplingFrequencyValue returns the actual sampling frequency in Hz.
 func (f FrameHeader) SamplingFrequencyValue() (int, error) {
 	switch f.SamplingFrequency() {
-	case 0:
+	case consts.SamplingFrequency44100:
 		return 44100 >> uint(f.LowSamplingFrequency()), nil
-	case 1:
+	case consts.SamplingFrequency48000:
 		return 48000 >> uint(f.LowSamplingFrequency()), nil
-	case 2:
+	case consts.SamplingFrequency32000:
 		return 32000 >> uint(f.LowSamplingFrequency()), nil
 	case consts.SamplingFrequencyReserved:
 		return 0, errors.New("mp3: frame header has reserved sample frequency")
@@ -136,7 +136,11 @@ func (f FrameHeader) BytesPerFrame() int {
 
 // Granules returns the number of granules per frame.
 func (f FrameHeader) Granules() int {
-	return consts.GranulesMpeg1 >> uint(f.LowSamplingFrequency()) // MPEG2 uses only 1 granule
+	if f.LowSamplingFrequency() == 0 {
+		return consts.GranulesMpeg1
+	}
+
+	return consts.GranulesMpeg2
 }
 
 // IsValid returns a boolean value indicating whether the header is valid or not.

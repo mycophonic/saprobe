@@ -23,13 +23,41 @@ import (
 	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/bits"
 	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/consts"
 	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/frameheader"
-	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/imdct"
+	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/imdct2"
 	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/maindata"
 	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/sideinfo"
 )
 
-var powtab34 = make([]float64, 8207)                                                                     //nolint:gochecknoglobals // immutable lookup table
-var pretab = []float64{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 3, 3, 3, 2, 0} //nolint:gochecknoglobals // immutable lookup table
+var (
+	powtab34 = make(
+		[]float64,
+		8207,
+	) //nolint:gochecknoglobals // immutable lookup table
+	pretab = []float64{
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		1,
+		1,
+		1,
+		1,
+		2,
+		2,
+		3,
+		3,
+		3,
+		2,
+		0,
+	} //nolint:gochecknoglobals // immutable lookup table
+)
 
 func init() { //nolint:gochecknoinits // precomputes lookup table
 	for i := range powtab34 {
@@ -43,7 +71,7 @@ type Frame struct {
 	sideInfo *sideinfo.SideInfo
 	mainData *maindata.MainData
 
-	mainDataBits *bits.Bits
+	mainDataBits *bits.Reader
 	store        [2][32][18]float32
 	vVec         [2][1024]float32
 }
@@ -90,7 +118,7 @@ func Read(source FullReader, position int64, prev *Frame) (frame *Frame, startPo
 	// If there's not enough main data in the bit reservoir,
 	// signal to calling function so that decoding isn't done!
 	// Get main data (scalefactors and Huffman coded frequency data)
-	var prevM *bits.Bits
+	var prevM *bits.Reader
 	if prev != nil {
 		prevM = prev.mainDataBits
 	}
@@ -326,7 +354,14 @@ func (f *Frame) reorder(granule, channel int) {
 	}
 }
 
-var isRatios = []float32{0.000000, 0.267949, 0.577350, 1.000000, 1.732051, 3.732051} //nolint:gochecknoglobals // immutable lookup table
+var isRatios = []float32{
+	0.000000,
+	0.267949,
+	0.577350,
+	1.000000,
+	1.732051,
+	3.732051,
+} //nolint:gochecknoglobals // immutable lookup table
 
 func (f *Frame) stereoProcessIntensityLong(granule, sfb int) {
 	var isRatioL, isRatioR float32
@@ -444,8 +479,28 @@ func (f *Frame) stereo(granule int) {
 	}
 }
 
-var antialiasCs = []float32{0.857493, 0.881742, 0.949629, 0.983315, 0.995518, 0.999161, 0.999899, 0.999993}   //nolint:gochecknoglobals // immutable lookup table
-var antialiasCa = []float32{-0.514496, -0.471732, -0.313377, -0.181913, -0.094574, -0.040966, -0.014199, -0.003700} //nolint:gochecknoglobals // immutable lookup table
+var (
+	antialiasCs = []float32{
+		0.857493,
+		0.881742,
+		0.949629,
+		0.983315,
+		0.995518,
+		0.999161,
+		0.999899,
+		0.999993,
+	} //nolint:gochecknoglobals // immutable lookup table
+	antialiasCa = []float32{
+		-0.514496,
+		-0.471732,
+		-0.313377,
+		-0.181913,
+		-0.094574,
+		-0.040966,
+		-0.014199,
+		-0.003700,
+	} //nolint:gochecknoglobals // immutable lookup table
+)
 
 func (f *Frame) antialias(granule, channel int) {
 	// No antialiasing is done for short blocks
@@ -475,6 +530,11 @@ func (f *Frame) antialias(granule, channel int) {
 }
 
 func (f *Frame) hybridSynthesis(granule, channel int) {
+	var (
+		freqIn [18]float32
+		rawout [36]float32
+	)
+
 	// Loop through all 32 subbands
 	for subband := range 32 {
 		// Determine blocktype for this subband
@@ -484,15 +544,15 @@ func (f *Frame) hybridSynthesis(granule, channel int) {
 			blockType = 0
 		}
 		// Do the inverse modified DCT and windowing
-		in := make([]float32, 18)
-		for i := range in {
-			in[i] = f.mainData.Is[granule][channel][subband*18+i]
+		off := subband * 18
+		for i := range 18 {
+			freqIn[i] = f.mainData.Is[granule][channel][off+i]
 		}
 
-		rawout := imdct.Win(in, blockType)
-		// Overlapp add with stored vector into main_data vector
+		imdct2.Win(&freqIn, blockType, &rawout)
+		// Overlap add with stored vector into main_data vector
 		for i := range 18 {
-			f.mainData.Is[granule][channel][subband*18+i] = rawout[i] + f.store[channel][subband][i]
+			f.mainData.Is[granule][channel][off+i] = rawout[i] + f.store[channel][subband][i]
 			f.store[channel][subband][i] = rawout[i+18]
 		}
 	}

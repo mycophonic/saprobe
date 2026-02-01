@@ -346,7 +346,7 @@ var huffmanMain = [...]huffTables{ //nolint:gochecknoglobals // immutable lookup
 }
 
 // Decode decodes Huffman coded values from the bit stream using the specified table.
-func Decode(m *bits.Bits, tableNum int) (x, y, v, w int, err error) {
+func Decode(m *bits.Reader, tableNum int) (x, y, v, w int, err error) {
 	point := 0
 	errFlag := 1
 	bitsleft := 32
@@ -368,7 +368,7 @@ func Decode(m *bits.Bits, tableNum int) (x, y, v, w int, err error) {
 			break
 		}
 
-		if m.Bit() != 0 { // Go right in tree
+		if m.ReadBit() != 0 { // Go right in tree
 			for (htptr[point] & 0xff) >= 250 {
 				point += int(htptr[point]) & 0xff
 			}
@@ -401,35 +401,35 @@ func Decode(m *bits.Bits, tableNum int) (x, y, v, w int, err error) {
 		x = (y >> 1) & 1
 		y &= 1
 
-		if (v != 0) && (m.Bit() == 1) {
+		if (v != 0) && (m.ReadBit() == 1) {
 			v = -v
 		}
 
-		if (w != 0) && (m.Bit() == 1) {
+		if (w != 0) && (m.ReadBit() == 1) {
 			w = -w
 		}
 
-		if (x != 0) && (m.Bit() == 1) {
+		if (x != 0) && (m.ReadBit() == 1) {
 			x = -x
 		}
 
-		if (y != 0) && (m.Bit() == 1) {
+		if (y != 0) && (m.ReadBit() == 1) {
 			y = -y
 		}
 	} else {
 		if (linbits != 0) && (x == 15) {
-			x += m.Bits(linbits) // Get linbits
+			x += m.ReadBits(linbits) // Get linbits
 		}
 
-		if (x != 0) && (m.Bit() == 1) {
+		if (x != 0) && (m.ReadBit() == 1) {
 			x = -x // Get sign bit
 		}
 
 		if (linbits != 0) && (y == 15) {
-			y += m.Bits(linbits) // Get linbits
+			y += m.ReadBits(linbits) // Get linbits
 		}
 
-		if (y != 0) && (m.Bit() == 1) {
+		if (y != 0) && (m.ReadBit() == 1) {
 			y = -y // Get sign bit
 		}
 	}

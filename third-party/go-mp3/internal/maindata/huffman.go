@@ -25,7 +25,7 @@ import (
 )
 
 func readHuffman(
-	bitStream *bits.Bits,
+	bitStream *bits.Reader,
 	header frameheader.FrameHeader,
 	sideInfo *sideinfo.SideInfo,
 	mainData *MainData,
@@ -149,7 +149,7 @@ func readHuffman(
 		isPos++
 	}
 	// Set the bitpos to point to the next part to read
-	bitStream.SetPos(bitPosEnd + 1)
+	bitStream.SetBitPos(bitPosEnd + 1)
 
 	return nil
 }

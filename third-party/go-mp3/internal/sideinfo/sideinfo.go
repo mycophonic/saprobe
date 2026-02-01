@@ -91,7 +91,7 @@ func Read(source FullReader, header frameheader.FrameHeader) (*SideInfo, error) 
 		return nil, fmt.Errorf("mp3: couldn't read sideinfo %d bytes: %w", sideInfoSize, err)
 	}
 
-	bitReader := bits.New(buf)
+	bitReader := bits.NewReader(buf)
 
 	mpeg1Frame := header.LowSamplingFrequency() == 0
 	bitsToRead := sideInfoBitsToRead[header.LowSamplingFrequency()]
@@ -99,41 +99,41 @@ func Read(source FullReader, header frameheader.FrameHeader) (*SideInfo, error) 
 	// Parse audio data
 	// Pointer to where we should start reading main data
 	sideInfo := &SideInfo{}
-	sideInfo.MainDataBegin = bitReader.Bits(bitsToRead[0])
+	sideInfo.MainDataBegin = bitReader.ReadBits(bitsToRead[0])
 	// Get private bits. Not used for anything.
 	if header.Mode() == consts.ModeSingleChannel {
-		sideInfo.PrivateBits = bitReader.Bits(bitsToRead[1])
+		sideInfo.PrivateBits = bitReader.ReadBits(bitsToRead[1])
 	} else {
-		sideInfo.PrivateBits = bitReader.Bits(bitsToRead[2])
+		sideInfo.PrivateBits = bitReader.ReadBits(bitsToRead[2])
 	}
 
 	if mpeg1Frame {
 		// Get scale factor selection information
 		for channel := range nch {
 			for scfsiBand := range 4 {
-				sideInfo.Scfsi[channel][scfsiBand] = bitReader.Bits(1)
+				sideInfo.Scfsi[channel][scfsiBand] = bitReader.ReadBits(1)
 			}
 		}
 	}
 	// Get the rest of the side information
 	for granule := range header.Granules() {
 		for channel := range nch {
-			sideInfo.Part2And3Length[granule][channel] = bitReader.Bits(12)
-			sideInfo.BigValues[granule][channel] = bitReader.Bits(9)
-			sideInfo.GlobalGain[granule][channel] = bitReader.Bits(8)
-			sideInfo.ScalefacCompress[granule][channel] = bitReader.Bits(bitsToRead[3])
+			sideInfo.Part2And3Length[granule][channel] = bitReader.ReadBits(12)
+			sideInfo.BigValues[granule][channel] = bitReader.ReadBits(9)
+			sideInfo.GlobalGain[granule][channel] = bitReader.ReadBits(8)
+			sideInfo.ScalefacCompress[granule][channel] = bitReader.ReadBits(bitsToRead[3])
 
-			sideInfo.WinSwitchFlag[granule][channel] = bitReader.Bits(1)
+			sideInfo.WinSwitchFlag[granule][channel] = bitReader.ReadBits(1)
 			if sideInfo.WinSwitchFlag[granule][channel] == 1 {
-				sideInfo.BlockType[granule][channel] = bitReader.Bits(2)
+				sideInfo.BlockType[granule][channel] = bitReader.ReadBits(2)
 
-				sideInfo.MixedBlockFlag[granule][channel] = bitReader.Bits(1)
+				sideInfo.MixedBlockFlag[granule][channel] = bitReader.ReadBits(1)
 				for region := range 2 {
-					sideInfo.TableSelect[granule][channel][region] = bitReader.Bits(5)
+					sideInfo.TableSelect[granule][channel][region] = bitReader.ReadBits(5)
 				}
 
 				for window := range 3 {
-					sideInfo.SubblockGain[granule][channel][window] = bitReader.Bits(3)
+					sideInfo.SubblockGain[granule][channel][window] = bitReader.ReadBits(3)
 				}
 
 				// TODO: This is not listed on the spec. Is this correct??
@@ -147,11 +147,11 @@ func Read(source FullReader, header frameheader.FrameHeader) (*SideInfo, error) 
 				sideInfo.Region1Count[granule][channel] = 20 - sideInfo.Region0Count[granule][channel]
 			} else {
 				for region := range 3 {
-					sideInfo.TableSelect[granule][channel][region] = bitReader.Bits(5)
+					sideInfo.TableSelect[granule][channel][region] = bitReader.ReadBits(5)
 				}
 
-				sideInfo.Region0Count[granule][channel] = bitReader.Bits(4)
-				sideInfo.Region1Count[granule][channel] = bitReader.Bits(3)
+				sideInfo.Region0Count[granule][channel] = bitReader.ReadBits(4)
+				sideInfo.Region1Count[granule][channel] = bitReader.ReadBits(3)
 
 				sideInfo.BlockType[granule][channel] = 0 // Implicit
 				if !mpeg1Frame {
@@ -160,11 +160,11 @@ func Read(source FullReader, header frameheader.FrameHeader) (*SideInfo, error) 
 			}
 
 			if mpeg1Frame {
-				sideInfo.Preflag[granule][channel] = bitReader.Bits(1)
+				sideInfo.Preflag[granule][channel] = bitReader.ReadBits(1)
 			}
 
-			sideInfo.ScalefacScale[granule][channel] = bitReader.Bits(1)
-			sideInfo.Count1TableSelect[granule][channel] = bitReader.Bits(1)
+			sideInfo.ScalefacScale[granule][channel] = bitReader.ReadBits(1)
+			sideInfo.Count1TableSelect[granule][channel] = bitReader.ReadBits(1)
 		}
 	}
 
