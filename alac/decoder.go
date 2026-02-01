@@ -2,9 +2,18 @@ package alac
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/mycophonic/saprobe"
 )
+
+//nolint:gochecknoglobals
+var alacBitDepths = []saprobe.BitDepth{
+	saprobe.Depth16,
+	saprobe.Depth20,
+	saprobe.Depth24,
+	saprobe.Depth32,
+}
 
 // Element type tags from the ALAC bitstream.
 const (
@@ -41,9 +50,9 @@ type Decoder struct {
 
 // NewDecoder creates a new ALAC decoder from the given configuration.
 func NewDecoder(config Config) (*Decoder, error) {
-	bitDepth, err := saprobe.ToBitDepth(config.BitDepth)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", errBitDepth, err)
+	bitDepth := saprobe.BitDepth(config.BitDepth)
+	if !slices.Contains(alacBitDepths, bitDepth) {
+		return nil, fmt.Errorf("%w: %d", errBitDepth, config.BitDepth)
 	}
 
 	frameLen := int(config.FrameLength)
