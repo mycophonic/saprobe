@@ -11,29 +11,37 @@ import "encoding/binary"
 
 func writeStereo16(out []byte, mixU, mixV []int32, chanIdx, numChan, numSamples int, mixBits, mixRes int32) {
 	stride := numChan * 2
-	offset := chanIdx * 2
+	pos := chanIdx * 2
 
 	if mixRes != 0 {
 		for idx := range numSamples {
 			left := mixU[idx] + mixV[idx] - ((mixRes * mixV[idx]) >> mixBits)
 			right := left - mixV[idx]
 
-			pos := offset + idx*stride
-			binary.LittleEndian.PutUint16(out[pos:], uint16(int16(left)))
-			binary.LittleEndian.PutUint16(out[pos+2:], uint16(int16(right)))
+			dst := out[pos : pos+4 : pos+4]
+			dst[0] = byte(left)
+			dst[1] = byte(left >> 8)
+			dst[2] = byte(right)
+			dst[3] = byte(right >> 8)
+			pos += stride
 		}
 	} else {
 		for idx := range numSamples {
-			pos := offset + idx*stride
-			binary.LittleEndian.PutUint16(out[pos:], uint16(int16(mixU[idx])))
-			binary.LittleEndian.PutUint16(out[pos+2:], uint16(int16(mixV[idx])))
+			l := mixU[idx]
+			r := mixV[idx]
+			dst := out[pos : pos+4 : pos+4]
+			dst[0] = byte(l)
+			dst[1] = byte(l >> 8)
+			dst[2] = byte(r)
+			dst[3] = byte(r >> 8)
+			pos += stride
 		}
 	}
 }
 
 func writeStereo20(out []byte, mixU, mixV []int32, chanIdx, numChan, numSamples int, mixBits, mixRes int32) {
 	stride := numChan * 3
-	offset := chanIdx * 3
+	pos := chanIdx * 3
 
 	if mixRes != 0 {
 		for idx := range numSamples {
@@ -42,26 +50,28 @@ func writeStereo20(out []byte, mixU, mixV []int32, chanIdx, numChan, numSamples 
 			left <<= 4
 			right <<= 4
 
-			pos := offset + idx*stride
-			out[pos+0] = byte(left)
-			out[pos+1] = byte(left >> 8)
-			out[pos+2] = byte(left >> 16)
-			out[pos+3] = byte(right)
-			out[pos+4] = byte(right >> 8)
-			out[pos+5] = byte(right >> 16)
+			dst := out[pos : pos+6 : pos+6]
+			dst[0] = byte(left)
+			dst[1] = byte(left >> 8)
+			dst[2] = byte(left >> 16)
+			dst[3] = byte(right)
+			dst[4] = byte(right >> 8)
+			dst[5] = byte(right >> 16)
+			pos += stride
 		}
 	} else {
 		for idx := range numSamples {
-			pos := offset + idx*stride
+			dst := out[pos : pos+6 : pos+6]
 			val := mixU[idx] << 4
-			out[pos+0] = byte(val)
-			out[pos+1] = byte(val >> 8)
-			out[pos+2] = byte(val >> 16)
+			dst[0] = byte(val)
+			dst[1] = byte(val >> 8)
+			dst[2] = byte(val >> 16)
 
 			val = mixV[idx] << 4
-			out[pos+3] = byte(val)
-			out[pos+4] = byte(val >> 8)
-			out[pos+5] = byte(val >> 16)
+			dst[3] = byte(val)
+			dst[4] = byte(val >> 8)
+			dst[5] = byte(val >> 16)
+			pos += stride
 		}
 	}
 }
@@ -71,7 +81,7 @@ func writeStereo24(out []byte, mixU, mixV []int32, chanIdx, numChan, numSamples 
 	mixBits, mixRes int32, shiftBuf []uint16, bytesShifted int,
 ) {
 	stride := numChan * 3
-	offset := chanIdx * 3
+	pos := chanIdx * 3
 	shift := bytesShifted * 8
 
 	if mixRes != 0 {
@@ -84,13 +94,14 @@ func writeStereo24(out []byte, mixU, mixV []int32, chanIdx, numChan, numSamples 
 				right = (right << shift) | int32(shiftBuf[idx*2+1])
 			}
 
-			pos := offset + idx*stride
-			out[pos+0] = byte(left)
-			out[pos+1] = byte(left >> 8)
-			out[pos+2] = byte(left >> 16)
-			out[pos+3] = byte(right)
-			out[pos+4] = byte(right >> 8)
-			out[pos+5] = byte(right >> 16)
+			dst := out[pos : pos+6 : pos+6]
+			dst[0] = byte(left)
+			dst[1] = byte(left >> 8)
+			dst[2] = byte(left >> 16)
+			dst[3] = byte(right)
+			dst[4] = byte(right >> 8)
+			dst[5] = byte(right >> 16)
+			pos += stride
 		}
 	} else {
 		for idx := range numSamples {
@@ -102,13 +113,14 @@ func writeStereo24(out []byte, mixU, mixV []int32, chanIdx, numChan, numSamples 
 				right = (right << shift) | int32(shiftBuf[idx*2+1])
 			}
 
-			pos := offset + idx*stride
-			out[pos+0] = byte(left)
-			out[pos+1] = byte(left >> 8)
-			out[pos+2] = byte(left >> 16)
-			out[pos+3] = byte(right)
-			out[pos+4] = byte(right >> 8)
-			out[pos+5] = byte(right >> 16)
+			dst := out[pos : pos+6 : pos+6]
+			dst[0] = byte(left)
+			dst[1] = byte(left >> 8)
+			dst[2] = byte(left >> 16)
+			dst[3] = byte(right)
+			dst[4] = byte(right >> 8)
+			dst[5] = byte(right >> 16)
+			pos += stride
 		}
 	}
 }
@@ -118,7 +130,7 @@ func writeStereo32(out []byte, mixU, mixV []int32, chanIdx, numChan, numSamples 
 	mixBits, mixRes int32, shiftBuf []uint16, bytesShifted int,
 ) {
 	stride := numChan * 4
-	offset := chanIdx * 4
+	pos := chanIdx * 4
 	shift := bytesShifted * 8
 
 	if mixRes != 0 {
@@ -131,9 +143,9 @@ func writeStereo32(out []byte, mixU, mixV []int32, chanIdx, numChan, numSamples 
 				right = (right << shift) | int32(shiftBuf[idx*2+1])
 			}
 
-			pos := offset + idx*stride
 			binary.LittleEndian.PutUint32(out[pos:], uint32(left))
 			binary.LittleEndian.PutUint32(out[pos+4:], uint32(right))
+			pos += stride
 		}
 	} else {
 		for idx := range numSamples {
@@ -145,9 +157,9 @@ func writeStereo32(out []byte, mixU, mixV []int32, chanIdx, numChan, numSamples 
 				right = (right << shift) | int32(shiftBuf[idx*2+1])
 			}
 
-			pos := offset + idx*stride
 			binary.LittleEndian.PutUint32(out[pos:], uint32(left))
 			binary.LittleEndian.PutUint32(out[pos+4:], uint32(right))
+			pos += stride
 		}
 	}
 }
@@ -156,30 +168,31 @@ func writeStereo32(out []byte, mixU, mixV []int32, chanIdx, numChan, numSamples 
 
 func writeMono16(out []byte, mixU []int32, chanIdx, numChan, numSamples int) {
 	stride := numChan * 2
-	offset := chanIdx * 2
+	pos := chanIdx * 2
 
 	for idx := range numSamples {
-		pos := offset + idx*stride
 		binary.LittleEndian.PutUint16(out[pos:], uint16(int16(mixU[idx])))
+		pos += stride
 	}
 }
 
 func writeMono20(out []byte, mixU []int32, chanIdx, numChan, numSamples int) {
 	stride := numChan * 3
-	offset := chanIdx * 3
+	pos := chanIdx * 3
 
 	for idx := range numSamples {
-		pos := offset + idx*stride
 		val := mixU[idx] << 4
-		out[pos+0] = byte(val)
-		out[pos+1] = byte(val >> 8)
-		out[pos+2] = byte(val >> 16)
+		dst := out[pos : pos+3 : pos+3]
+		dst[0] = byte(val)
+		dst[1] = byte(val >> 8)
+		dst[2] = byte(val >> 16)
+		pos += stride
 	}
 }
 
 func writeMono24(out []byte, mixU []int32, chanIdx, numChan, numSamples int, shiftBuf []uint16, bytesShifted int) {
 	stride := numChan * 3
-	offset := chanIdx * 3
+	pos := chanIdx * 3
 	shift := bytesShifted * 8
 
 	for idx := range numSamples {
@@ -188,16 +201,17 @@ func writeMono24(out []byte, mixU []int32, chanIdx, numChan, numSamples int, shi
 			val = (val << shift) | int32(shiftBuf[idx])
 		}
 
-		pos := offset + idx*stride
-		out[pos+0] = byte(val)
-		out[pos+1] = byte(val >> 8)
-		out[pos+2] = byte(val >> 16)
+		dst := out[pos : pos+3 : pos+3]
+		dst[0] = byte(val)
+		dst[1] = byte(val >> 8)
+		dst[2] = byte(val >> 16)
+		pos += stride
 	}
 }
 
 func writeMono32(out []byte, mixU []int32, chanIdx, numChan, numSamples int, shiftBuf []uint16, bytesShifted int) {
 	stride := numChan * 4
-	offset := chanIdx * 4
+	pos := chanIdx * 4
 	shift := bytesShifted * 8
 
 	for idx := range numSamples {
@@ -206,7 +220,7 @@ func writeMono32(out []byte, mixU []int32, chanIdx, numChan, numSamples int, shi
 			val = (val << shift) | int32(shiftBuf[idx])
 		}
 
-		pos := offset + idx*stride
 		binary.LittleEndian.PutUint32(out[pos:], uint32(val))
+		pos += stride
 	}
 }

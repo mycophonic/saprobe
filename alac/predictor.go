@@ -317,6 +317,8 @@ func unpcBlock8(pc1, out []int32, num int, coefs []int16, lim int, chanShift, de
 }
 
 // unpcBlockGeneral is the general predictor for any numActive.
+//
+//revive:disable:cognitive-complexity
 func unpcBlockGeneral(
 	pc1, out []int32,
 	num int,
@@ -326,13 +328,21 @@ func unpcBlockGeneral(
 	chanShift, denShift uint32,
 	denHalf int32,
 ) {
+	activeCount := int(numActive)
+	coefsNA := coefs[:activeCount:activeCount] // BCE: compiler knows len and cap
+
 	for idx := lim; idx < num; idx++ {
+		// Sub-slice the history window [idx-lim .. idx-1] for bounds check elimination.
+		// hist[0] = out[idx-lim] = top, hist[activeCount] = out[idx-1] (since lim = activeCount+1).
+		hist := out[idx-lim : idx] // length = lim = activeCount+1
+
+		top := hist[0]
+
+		// Prediction sum: dot product of coefs and (history - top).
 		var sum1 int32
 
-		top := out[idx-lim]
-
-		for k := range numActive {
-			sum1 += int32(coefs[k]) * (out[idx-1-int(k)] - top)
+		for k := range activeCount {
+			sum1 += int32(coefsNA[k]) * (hist[activeCount-k] - top)
 		}
 
 		del := pc1[idx]
@@ -341,24 +351,25 @@ func unpcBlockGeneral(
 		del += top + ((sum1 + denHalf) >> denShift)
 		out[idx] = (del << chanShift) >> chanShift
 
+		// Coefficient adaptation.
 		if sign > 0 {
-			for k := numActive - 1; k >= 0; k-- {
-				dd := top - out[idx-1-int(k)]
+			for k := activeCount - 1; k >= 0; k-- {
+				dd := top - hist[activeCount-k]
 				sgn := signOfInt(dd)
-				coefs[k] -= int16(sgn)
+				coefsNA[k] -= int16(sgn)
 
-				del0 -= (numActive - k) * ((sgn * dd) >> int32(denShift))
+				del0 -= int32(activeCount-k) * ((sgn * dd) >> int32(denShift))
 				if del0 <= 0 {
 					break
 				}
 			}
 		} else if sign < 0 {
-			for k := numActive - 1; k >= 0; k-- {
-				dd := top - out[idx-1-int(k)]
+			for k := activeCount - 1; k >= 0; k-- {
+				dd := top - hist[activeCount-k]
 				sgn := signOfInt(dd)
-				coefs[k] += int16(sgn)
+				coefsNA[k] += int16(sgn)
 
-				del0 -= (numActive - k) * ((-sgn * dd) >> int32(denShift))
+				del0 -= int32(activeCount-k) * ((-sgn * dd) >> int32(denShift))
 				if del0 >= 0 {
 					break
 				}

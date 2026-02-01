@@ -36,6 +36,7 @@ type Decoder struct {
 	mixBufferV  []int32
 	predictor   []int32
 	shiftBuffer []uint16
+	bits        bitBuffer // reusable bit reader (avoids per-packet allocation)
 }
 
 // NewDecoder creates a new ALAC decoder from the given configuration.
@@ -68,18 +69,32 @@ func (d *Decoder) Format() saprobe.PCMFormat {
 
 // DecodePacket decodes a single ALAC packet into interleaved LE signed PCM bytes.
 func (d *Decoder) DecodePacket(packet []byte) ([]byte, error) {
-	bits := newBitBuffer(packet)
+	numChan := int(d.config.NumChannels)
+	bps := d.format.BitDepth.BytesPerSample()
+	output := make([]byte, int(d.config.FrameLength)*numChan*bps)
+
+	n, err := d.decodePacketInto(packet, output)
+	if err != nil {
+		return nil, err
+	}
+
+	return output[:n], nil
+}
+
+// decodePacketInto decodes a single ALAC packet into the provided output buffer.
+// Returns the number of bytes written. The output buffer must be large enough
+// to hold one full frame (FrameLength * NumChannels * BytesPerSample).
+func (d *Decoder) decodePacketInto(packet, output []byte) (int, error) {
+	d.bits.reset(packet)
+	bits := &d.bits
 	numSamples := d.config.FrameLength
 	numChan := int(d.config.NumChannels)
 	bps := d.format.BitDepth.BytesPerSample()
 	chanIdx := 0
 
-	// Allocate output for max possible size (Go zero-fills, so remaining channels are silent).
-	output := make([]byte, int(numSamples)*numChan*bps)
-
 	for {
 		if bits.pastEnd() {
-			return nil, errBitstreamOverrun
+			return 0, errBitstreamOverrun
 		}
 
 		tag := bits.readSmall(3)
@@ -88,7 +103,7 @@ func (d *Decoder) DecodePacket(packet []byte) ([]byte, error) {
 		case elemSCE, elemLFE:
 			ns, err := d.decodeSCE(bits, output, chanIdx, numChan, numSamples)
 			if err != nil {
-				return nil, fmt.Errorf("alac: SCE/LFE decode: %w", err)
+				return 0, fmt.Errorf("alac: SCE/LFE decode: %w", err)
 			}
 
 			numSamples = ns
@@ -101,23 +116,23 @@ func (d *Decoder) DecodePacket(packet []byte) ([]byte, error) {
 
 			ns, err := d.decodeCPE(bits, output, chanIdx, numChan, numSamples)
 			if err != nil {
-				return nil, fmt.Errorf("alac: CPE decode: %w", err)
+				return 0, fmt.Errorf("alac: CPE decode: %w", err)
 			}
 
 			numSamples = ns
 			chanIdx += 2
 
 		case elemCCE, elemPCE:
-			return nil, errUnsupportedElement
+			return 0, errUnsupportedElement
 
 		case elemDSE:
 			if err := d.skipDSE(bits); err != nil {
-				return nil, err
+				return 0, err
 			}
 
 		case elemFIL:
 			if err := d.skipFIL(bits); err != nil {
-				return nil, err
+				return 0, err
 			}
 
 		case elemEND:
@@ -134,9 +149,7 @@ func (d *Decoder) DecodePacket(packet []byte) ([]byte, error) {
 	}
 
 done:
-	actualSize := int(numSamples) * numChan * bps
-
-	return output[:actualSize], nil
+	return int(numSamples) * numChan * bps, nil
 }
 
 // decodeSCE decodes a Single Channel Element (mono) or LFE element.

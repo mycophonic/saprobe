@@ -30,9 +30,12 @@ func Decode(reader io.ReadSeeker) ([]byte, saprobe.PCMFormat, error) {
 
 	format := dec.Format()
 	bps := format.BitDepth.BytesPerSample()
+	frameBytes := int(config.FrameLength) * int(config.NumChannels) * bps
 
-	// Rough capacity estimate (last frame may be shorter).
-	pcm := make([]byte, 0, len(samples)*int(config.FrameLength)*int(config.NumChannels)*bps)
+	// Pre-allocate the full output buffer. Last frame may be shorter,
+	// so we allocate for max and truncate at the end.
+	pcm := make([]byte, len(samples)*frameBytes)
+	offset := 0
 
 	var packetBuf []byte
 
@@ -56,15 +59,15 @@ func Decode(reader io.ReadSeeker) ([]byte, saprobe.PCMFormat, error) {
 			return nil, saprobe.PCMFormat{}, fmt.Errorf("reading sample %d: %w", idx, err)
 		}
 
-		decoded, err := dec.DecodePacket(packet)
+		n, err := dec.decodePacketInto(packet, pcm[offset:])
 		if err != nil {
 			return nil, saprobe.PCMFormat{}, fmt.Errorf("decoding packet %d: %w", idx, err)
 		}
 
-		pcm = append(pcm, decoded...)
+		offset += n
 	}
 
-	return pcm, format, nil
+	return pcm[:offset], format, nil
 }
 
 // sampleInfo holds the byte offset and size of a single encoded ALAC packet

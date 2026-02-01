@@ -51,9 +51,15 @@ For raw PCM:
 saprobe decode --raw my_audio_file
 ```
 
+## Performance
+
+* FLAC is 2x slower than xyph reference C implementation
+* ALAC is 
+
 ## Features and support coverage
 
 See [QA](docs/QA.md) for some data on testing scope.
+
 
 ### P0: FLAC
 

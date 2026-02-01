@@ -30,6 +30,7 @@ ICON ?= "🧿"
 ORG ?= github.com/mycophonic
 ALLOWED_LICENSES ?= Apache-2.0,BSD-2-Clause,BSD-3-Clause,MIT
 LICENSE_IGNORES ?=
+COVER_MIN ?= 0
 
 # Auto-detect Go module presence.
 ifneq ($(wildcard $(PROJECT_DIR)/go.mod),)
@@ -59,7 +60,7 @@ help:
 
 # Tasks
 ifeq ($(HAS_GO),true)
-lint: lint-go lint-commits lint-mod lint-licenses-all lint-headers lint-yaml lint-shell lint-go-all
+lint: lint-go lint-vuln lint-commits lint-mod lint-licenses-all lint-headers lint-yaml lint-shell lint-go-all
 else
 lint: lint-commits lint-headers lint-yaml lint-shell
 endif
@@ -72,8 +73,14 @@ fix: ## Automatically fix some issues
 endif
 
 ifeq ($(HAS_GO),true)
+all: clean build lint test ## Clean, build, lint, and test everything
+else
+all: clean lint ## Clean and lint everything
+endif
+
+ifeq ($(HAS_GO),true)
 test: unit ## Run all tests
-unit: test-unit test-unit-race test-unit-bench ## Run unit tests
+unit: test-unit test-unit-race test-unit-bench test-unit-cover ## Run unit tests
 else
 test: ## Run all tests
 	@echo "No Go code detected, skipping tests"
@@ -88,6 +95,12 @@ lint-go:
 	$(call title, $@ $(GOOS))
 	@cd $(PROJECT_DIR) \
 		&& golangci-lint run $(VERBOSE_FLAG_LONG) ./...
+	$(call footer, $@)
+
+lint-vuln:
+	$(call title, $@)
+	@cd $(PROJECT_DIR) \
+		&& govulncheck ./...
 	$(call footer, $@)
 
 ifeq ($(CGO_ENABLED),1)
@@ -127,7 +140,7 @@ lint-commits:
 lint-headers:
 	$(call title, $@)
 	@cd $(PROJECT_DIR) \
-		&& ltag -t "./hack/headers" --check -v
+		&& ltag -t "./hack/headers" --excludes "bin" --check -v
 	$(call footer, $@)
 
 lint-mod:
@@ -244,13 +257,15 @@ install-dev-tools: export CGO_CPPFLAGS :=
 install-dev-tools: export CGO_LDFLAGS :=
 install-dev-tools: install-dev-gotestsum
 	$(call title, $@)
-	# 2026-01-23
+	# 2026-01-31
 	# - golangci: v2.8.0
+	# - govulncheck: v1.1.4
 	# - git-validation: main
 	# - ltag: main
 	# - go-licenses: v2.0.1
 	@cd $(PROJECT_DIR) \
 		&& go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@e2e40021c9007020676c93680a36e3ab06c6cd33 \
+		&& go install golang.org/x/vuln/cmd/govulncheck@d1f380186385b4f64e00313f31743df8e4b89a77 \
 		&& go install github.com/vbatts/git-validation@a8d455533459b620fa656bad095b943e70cede9b \
 		&& go install github.com/containerd/ltag@66e6a514664ee2d11a470735519fa22b1a9eaabd \
 		&& go install github.com/google/go-licenses/v2@3e084b0caf710f7bfead967567539214f598c0a2
@@ -267,9 +282,21 @@ test-unit-bench:
 	@go test $(VERBOSE_FLAG) -count 1 $(PROJECT_DIR)/... -bench=.
 	$(call footer, $@)
 
+# Force external linking for race tests. The race detector injects runtime/cgo
+# into every package, including those without "import C". CGO_CFLAGS hardening
+# flags (-fstack-protector-strong, -fPIE) cause GCC to emit object code
+# referencing libc symbols (stderr, etc.). For packages without direct CGO, Go
+# uses its internal linker which cannot resolve libc symbols, failing on Linux
+# with: runtime/cgo(.text): relocation target stderr not defined
+# Forcing -linkmode=external makes GCC perform the final link, resolving libc.
+#
+# See:
+#   https://github.com/golang/go/issues/52690
+#   https://github.com/golang/go/issues/54313
+#   https://github.com/golang/go/issues/58619
 test-unit-race:
 	$(call title, $@)
-	@CGO_ENABLED=1 go test $(VERBOSE_FLAG) $(PROJECT_DIR)/... -race
+	@CGO_ENABLED=1 go test $(VERBOSE_FLAG) -ldflags="-linkmode=external" $(PROJECT_DIR)/... -race
 	$(call footer, $@)
 
 PROF_DIR := $(PROJECT_DIR)/bin/profiles
@@ -306,7 +333,26 @@ test-unit-profile: ## Run tests with CPU and memory profiling
 	@echo "Analyze interactively: go tool pprof <profile>"
 	$(call footer, $@)
 
+COVER_DIR := $(PROJECT_DIR)/bin/coverage
+
+test-unit-cover: ## Run tests with coverage reporting
+	$(call title, $@)
+	@mkdir -p $(COVER_DIR)
+	@go test $(VERBOSE_FLAG) -count 1 -coverprofile="$(COVER_DIR)/coverage.out" $(PROJECT_DIR)/...
+	@go tool cover -func="$(COVER_DIR)/coverage.out"
+	@go tool cover -html="$(COVER_DIR)/coverage.out" -o "$(COVER_DIR)/coverage.html" \
+		&& echo "HTML report: $(COVER_DIR)/coverage.html"
+	@if [ "$(COVER_MIN)" -gt 0 ] 2>/dev/null; then \
+		total=$$(go tool cover -func="$(COVER_DIR)/coverage.out" | grep ^total | awk '{print $$3}' | tr -d '%'); \
+		if [ "$$(echo "$$total < $(COVER_MIN)" | bc)" -eq 1 ]; then \
+			echo "Coverage $${total}% below minimum $(COVER_MIN)%"; exit 1; \
+		fi; \
+		echo "Coverage $${total}% meets minimum $(COVER_MIN)%"; \
+	fi
+	$(call footer, $@)
+
 .PHONY: \
+	all \
 	lint \
 	fix \
 	test \
@@ -314,9 +360,9 @@ test-unit-profile: ## Run tests with CPU and memory profiling
 	unit \
 	init-dev init-dev-system \
 	install-dev-tools install-dev-gotestsum \
-	lint-commits lint-go lint-go-all lint-headers lint-licenses lint-licenses-all lint-mod lint-shell lint-yaml \
+	lint-commits lint-go lint-go-all lint-headers lint-licenses lint-licenses-all lint-mod lint-shell lint-vuln lint-yaml \
 	fix-go fix-go-all fix-mod \
-	test-unit test-unit-race test-unit-bench test-unit-profile \
+	test-unit test-unit-race test-unit-bench test-unit-cover test-unit-profile \
 	build build-debug build-static install verify clean
 
 # Default target

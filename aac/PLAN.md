@@ -3,7 +3,7 @@
 ## Overview
 
 CoreAudio-based AAC decoder via CGO. macOS-only, gated behind the `with_aac` build tag.
-Linux and Windows remain pure Go — using `with_aac` on those platforms is a compile error.
+Linux and Windows remain pure Go. Using `with_aac` on those platforms is a compile error.
 
 ## Build Constraint Matrix
 

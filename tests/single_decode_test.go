@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -115,45 +114,24 @@ type fileProperties struct {
 func probeFileProperties(t *testing.T, path string) fileProperties {
 	t.Helper()
 
-	ffprobeBin, err := agar.LookFor("ffprobe")
-	if err != nil {
-		t.Fatalf("ffprobe not found: %v", err)
-	}
-
-	// Get codec, sample rate, channels, bit depth
-	out, err := exec.Command(ffprobeBin,
-		"-v", "quiet",
-		"-select_streams", "a:0",
-		"-show_entries", "stream=codec_name,sample_rate,channels,bits_per_raw_sample,duration",
-		"-of", "csv=p=0",
-		path,
-	).Output()
+	result, err := agar.FFProbe(path)
 	if err != nil {
 		t.Fatalf("ffprobe failed: %v", err)
 	}
 
-	parts := strings.Split(strings.TrimSpace(string(out)), ",")
-	if len(parts) < 5 {
-		t.Fatalf("unexpected ffprobe output: %s", out)
+	stream, streamErr := result.AudioStream()
+	if streamErr != nil {
+		t.Fatalf("ffprobe: no audio stream in %s", path)
 	}
 
-	props := fileProperties{
-		codec: parts[0],
+	return fileProperties{
+		codec:        stream.CodecName,
+		sampleRate:   stream.SampleRateInt(),
+		channels:     stream.Channels,
+		bitDepth:     stream.BitDepth(),
+		duration:     stream.DurationFloat(),
+		totalSamples: int(stream.DurationFloat() * float64(stream.SampleRateInt())),
 	}
-
-	props.sampleRate, _ = strconv.Atoi(parts[1])
-	props.channels, _ = strconv.Atoi(parts[2])
-	props.bitDepth, _ = strconv.Atoi(parts[3])
-	props.duration, _ = strconv.ParseFloat(parts[4], 64)
-
-	// Default bit depth for lossy or if not reported
-	if props.bitDepth == 0 {
-		props.bitDepth = 16
-	}
-
-	props.totalSamples = int(props.duration * float64(props.sampleRate))
-
-	return props
 }
 
 func pcmFormatFromDepth(bitDepth int, ext string) string {
@@ -233,6 +211,8 @@ func decodeWithSaprobe(t *testing.T, path string) ([]byte, saprobe.PCMFormat, er
 		return vorbis.Decode(file)
 	case detect.ALAC:
 		return alac.Decode(file)
+	case detect.WAV, detect.AAC, detect.DSF, detect.DFF:
+		return nil, saprobe.PCMFormat{}, fmt.Errorf("unsupported codec: %s", codec)
 	case detect.Unknown:
 		return nil, saprobe.PCMFormat{}, fmt.Errorf("unsupported codec: %s", codec)
 	default:

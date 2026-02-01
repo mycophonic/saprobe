@@ -14,14 +14,23 @@ type bitBuffer struct {
 
 const bitBufferPadding = 4
 
-func newBitBuffer(data []byte) *bitBuffer {
-	padded := make([]byte, len(data)+bitBufferPadding)
-	copy(padded, data)
-
-	return &bitBuffer{
-		buf:  padded,
-		size: len(data),
+// reset reuses the bitBuffer's backing storage, growing it only if needed.
+// This avoids a fresh allocation per packet.
+func (b *bitBuffer) reset(data []byte) {
+	needed := len(data) + bitBufferPadding
+	if cap(b.buf) < needed {
+		b.buf = make([]byte, needed)
+	} else {
+		b.buf = b.buf[:needed]
 	}
+
+	copy(b.buf, data)
+	// Zero the padding bytes (copy doesn't touch them if data is shorter).
+	clear(b.buf[len(data):])
+
+	b.pos = 0
+	b.bitIdx = 0
+	b.size = len(data)
 }
 
 // read reads up to 16 bits and returns them right-aligned.

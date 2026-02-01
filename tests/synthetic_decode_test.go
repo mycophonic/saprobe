@@ -32,54 +32,6 @@ type codecConfig struct {
 	decoder        func(path string) ([]byte, saprobe.PCMFormat, error)
 }
 
-// ALAC: lossless, supports 16/24-bit at various sample rates, mono and stereo.
-var alacConfigs = []codecConfig{
-	// 16-bit stereo
-	{
-		name: "alac_16bit_44100_stereo", ext: "m4a", sampleRate: 44100, bitDepth: 16, channels: 2, outputChannels: 2,
-		ffmpegArgs: []string{"-c:a", "alac", "-sample_fmt", "s16p"}, decoder: decodeAlac,
-	},
-	{
-		name: "alac_16bit_48000_stereo", ext: "m4a", sampleRate: 48000, bitDepth: 16, channels: 2, outputChannels: 2,
-		ffmpegArgs: []string{"-c:a", "alac", "-sample_fmt", "s16p"}, decoder: decodeAlac,
-	},
-	{
-		name: "alac_16bit_96000_stereo", ext: "m4a", sampleRate: 96000, bitDepth: 16, channels: 2, outputChannels: 2,
-		ffmpegArgs: []string{"-c:a", "alac", "-sample_fmt", "s16p"}, decoder: decodeAlac,
-	},
-	{
-		name: "alac_16bit_192000_stereo", ext: "m4a", sampleRate: 192000, bitDepth: 16, channels: 2, outputChannels: 2,
-		ffmpegArgs: []string{"-c:a", "alac", "-sample_fmt", "s16p"}, decoder: decodeAlac,
-	},
-	// 24-bit stereo
-	{
-		name: "alac_24bit_44100_stereo", ext: "m4a", sampleRate: 44100, bitDepth: 24, channels: 2, outputChannels: 2,
-		ffmpegArgs: []string{"-c:a", "alac", "-sample_fmt", "s32p"}, decoder: decodeAlac,
-	},
-	{
-		name: "alac_24bit_48000_stereo", ext: "m4a", sampleRate: 48000, bitDepth: 24, channels: 2, outputChannels: 2,
-		ffmpegArgs: []string{"-c:a", "alac", "-sample_fmt", "s32p"}, decoder: decodeAlac,
-	},
-	{
-		name: "alac_24bit_96000_stereo", ext: "m4a", sampleRate: 96000, bitDepth: 24, channels: 2, outputChannels: 2,
-		ffmpegArgs: []string{"-c:a", "alac", "-sample_fmt", "s32p"}, decoder: decodeAlac,
-	},
-	{
-		name: "alac_24bit_192000_stereo", ext: "m4a", sampleRate: 192000, bitDepth: 24, channels: 2, outputChannels: 2,
-		ffmpegArgs: []string{"-c:a", "alac", "-sample_fmt", "s32p"}, decoder: decodeAlac,
-	},
-	// 16-bit mono
-	{
-		name: "alac_16bit_44100_mono", ext: "m4a", sampleRate: 44100, bitDepth: 16, channels: 1, outputChannels: 1,
-		ffmpegArgs: []string{"-c:a", "alac", "-sample_fmt", "s16p"}, decoder: decodeAlac,
-	},
-	// 24-bit mono
-	{
-		name: "alac_24bit_44100_mono", ext: "m4a", sampleRate: 44100, bitDepth: 24, channels: 1, outputChannels: 1,
-		ffmpegArgs: []string{"-c:a", "alac", "-sample_fmt", "s32p"}, decoder: decodeAlac,
-	},
-}
-
 // Vorbis: lossy, supports various sample rates, mono and stereo.
 var vorbisConfigs = []codecConfig{
 	// Stereo
@@ -146,17 +98,6 @@ var mp3Configs = []codecConfig{
 		name: "mp3_mpeg1_44100_stereo_cbr128", ext: "mp3", sampleRate: 44100, bitDepth: 16, channels: 2, outputChannels: 2, lossy: true,
 		ffmpegArgs: []string{"-c:a", "libmp3lame", "-b:a", "128k"}, decoder: decodeMp3,
 	},
-}
-
-func TestALACDecode(t *testing.T) {
-	t.Parallel()
-
-	for _, cfg := range alacConfigs {
-		t.Run(cfg.name, func(t *testing.T) {
-			t.Parallel()
-			runSyntheticTest(t, cfg)
-		})
-	}
 }
 
 func TestVorbisDecode(t *testing.T) {

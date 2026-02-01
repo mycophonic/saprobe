@@ -1,6 +1,9 @@
 package alac
 
-import "math/bits"
+import (
+	"encoding/binary"
+	"math/bits"
+)
 
 // Adaptive Golomb-Rice entropy decoder.
 // Ported from ag_dec.c and aglib.h.
@@ -45,10 +48,6 @@ func setAGParams(params *agParams, meanBase, partBound, kBase, frameWin, sampleW
 // lead returns the number of leading zeros in a 32-bit value.
 // Equivalent to the Apple lead() function.
 func lead(m int32) int32 {
-	if m == 0 {
-		return 32
-	}
-
 	return int32(bits.LeadingZeros32(uint32(m)))
 }
 
@@ -58,9 +57,10 @@ func lg3a(x int32) int32 {
 }
 
 // read32bit reads 4 bytes big-endian from a byte slice at the given offset.
+// binary.BigEndian.Uint32 is intrinsified by the Go compiler as a single
+// load + byte-swap instruction, replacing 4 individual byte loads.
 func read32bit(buf []byte, offset int) uint32 {
-	return uint32(buf[offset])<<24 | uint32(buf[offset+1])<<16 |
-		uint32(buf[offset+2])<<8 | uint32(buf[offset+3])
+	return binary.BigEndian.Uint32(buf[offset:])
 }
 
 // getStreamBits reads up to 32 bits from an arbitrary bit position in a byte buffer.
@@ -89,8 +89,9 @@ func getStreamBits(input []byte, bitOffset, numBits uint32) uint32 {
 }
 
 // dynGet decodes one Golomb-coded value (16-bit variant used for zero-run counts).
-func dynGet(input []byte, bitPos *uint32, golombM, golombK uint32) uint32 {
-	tempBits := *bitPos
+// Returns (decoded value, updated bit position).
+func dynGet(input []byte, bitPos, golombM, golombK uint32) (result, newBitPos uint32) {
+	tempBits := bitPos
 
 	streamLong := read32bit(input, int(tempBits>>3))
 	streamLong <<= tempBits & 7
@@ -102,11 +103,10 @@ func dynGet(input []byte, bitPos *uint32, golombM, golombK uint32) uint32 {
 		pre = maxPrefix16
 		tempBits += pre
 		streamLong <<= pre
-		result := streamLong >> (32 - maxDatatype16)
+		result = streamLong >> (32 - maxDatatype16)
 		tempBits += maxDatatype16
-		*bitPos = tempBits
 
-		return result
+		return result, tempBits
 	}
 
 	tempBits += pre + 1
@@ -114,7 +114,6 @@ func dynGet(input []byte, bitPos *uint32, golombM, golombK uint32) uint32 {
 	val := streamLong >> (32 - golombK)
 	tempBits += golombK
 
-	var result uint32
 	if val < 2 {
 		result = pre * golombM
 		tempBits--
@@ -122,20 +121,19 @@ func dynGet(input []byte, bitPos *uint32, golombM, golombK uint32) uint32 {
 		result = pre*golombM + val - 1
 	}
 
-	*bitPos = tempBits
-
-	return result
+	return result, tempBits
 }
 
 // dynGet32Bit decodes one Golomb-coded value (32-bit variant used for sample residuals).
-func dynGet32Bit(input []byte, bitPos *uint32, golombM uint32, golombK, maxBits int32) uint32 {
-	tempBits := *bitPos
+// Returns (decoded value, updated bit position).
+func dynGet32Bit(input []byte, bitPos, golombM uint32, golombK, maxBits int32) (result, newBitPos uint32) {
+	tempBits := bitPos
 
 	streamLong := read32bit(input, int(tempBits>>3))
 	streamLong <<= tempBits & 7
 
 	// Count leading ones.
-	result := uint32(lead(int32(^streamLong)))
+	result = uint32(lead(int32(^streamLong)))
 
 	if result >= maxPrefix32 {
 		result = getStreamBits(input, tempBits+maxPrefix32, uint32(maxBits))
@@ -157,9 +155,7 @@ func dynGet32Bit(input []byte, bitPos *uint32, golombM uint32, golombK, maxBits 
 		}
 	}
 
-	*bitPos = tempBits
-
-	return result
+	return result, tempBits
 }
 
 // dynDecomp performs adaptive Golomb-Rice entropy decoding of a sample block.
@@ -178,6 +174,8 @@ func dynDecomp(params *agParams, bitBuf *bitBuffer, predCoefs []int32, numSample
 	kbLocal := params.kb
 	wbLocal := params.wb
 
+	var residual uint32
+
 	for count < numSamples {
 		if bitPos >= maxPos {
 			return errBitstreamOverrun
@@ -188,7 +186,7 @@ func dynDecomp(params *agParams, bitBuf *bitBuffer, predCoefs []int32, numSample
 
 		m = (1 << uint32(k)) - 1
 
-		residual := dynGet32Bit(input, &bitPos, m, k, int32(maxSize))
+		residual, bitPos = dynGet32Bit(input, bitPos, m, k, int32(maxSize))
 
 		// Decode sign from LSB.
 		ndecode := residual + uint32(zmode)
@@ -215,7 +213,7 @@ func dynDecomp(params *agParams, bitBuf *bitBuffer, predCoefs []int32, numSample
 
 			mz := ((uint32(1) << uint32(k32)) - 1) & wbLocal
 
-			residual = dynGet(input, &bitPos, mz, uint32(k32))
+			residual, bitPos = dynGet(input, bitPos, mz, uint32(k32))
 
 			if count+int(residual) > numSamples {
 				return errSampleOverrun
