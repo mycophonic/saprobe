@@ -146,10 +146,7 @@ func (d *Decoder) Seek(offset int64, whence int) (int64, error) {
 			return 0, err
 		}
 
-		skip := d.bytesPerFrame + (d.pos % d.bytesPerFrame)
-		if skip > int64(len(d.buf)) {
-			skip = int64(len(d.buf))
-		}
+		skip := min(d.bytesPerFrame+(d.pos%d.bytesPerFrame), int64(len(d.buf)))
 
 		d.buf = d.buf[skip:]
 	} else {
@@ -161,10 +158,7 @@ func (d *Decoder) Seek(offset int64, whence int) (int64, error) {
 			return 0, err
 		}
 
-		skip := d.pos
-		if skip > int64(len(d.buf)) {
-			skip = int64(len(d.buf))
-		}
+		skip := min(d.pos, int64(len(d.buf)))
 
 		d.buf = d.buf[skip:]
 	}

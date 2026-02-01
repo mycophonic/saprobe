@@ -55,7 +55,7 @@ type SideInfo struct {
 	Count1            [2][2]int // Not in file, calc by huffman decoder
 }
 
-var sideInfoBitsToRead = [2][4]int{
+var sideInfoBitsToRead = [2][4]int{ //nolint:gochecknoglobals // immutable lookup table
 	{ // MPEG 1
 		9, 5, 3, 4,
 	},
@@ -116,55 +116,55 @@ func Read(source FullReader, header frameheader.FrameHeader) (*SideInfo, error) 
 		}
 	}
 	// Get the rest of the side information
-	for gr := range header.Granules() {
+	for granule := range header.Granules() {
 		for channel := range nch {
-			sideInfo.Part2And3Length[gr][channel] = bitReader.Bits(12)
-			sideInfo.BigValues[gr][channel] = bitReader.Bits(9)
-			sideInfo.GlobalGain[gr][channel] = bitReader.Bits(8)
-			sideInfo.ScalefacCompress[gr][channel] = bitReader.Bits(bitsToRead[3])
+			sideInfo.Part2And3Length[granule][channel] = bitReader.Bits(12)
+			sideInfo.BigValues[granule][channel] = bitReader.Bits(9)
+			sideInfo.GlobalGain[granule][channel] = bitReader.Bits(8)
+			sideInfo.ScalefacCompress[granule][channel] = bitReader.Bits(bitsToRead[3])
 
-			sideInfo.WinSwitchFlag[gr][channel] = bitReader.Bits(1)
-			if sideInfo.WinSwitchFlag[gr][channel] == 1 {
-				sideInfo.BlockType[gr][channel] = bitReader.Bits(2)
+			sideInfo.WinSwitchFlag[granule][channel] = bitReader.Bits(1)
+			if sideInfo.WinSwitchFlag[granule][channel] == 1 {
+				sideInfo.BlockType[granule][channel] = bitReader.Bits(2)
 
-				sideInfo.MixedBlockFlag[gr][channel] = bitReader.Bits(1)
+				sideInfo.MixedBlockFlag[granule][channel] = bitReader.Bits(1)
 				for region := range 2 {
-					sideInfo.TableSelect[gr][channel][region] = bitReader.Bits(5)
+					sideInfo.TableSelect[granule][channel][region] = bitReader.Bits(5)
 				}
 
 				for window := range 3 {
-					sideInfo.SubblockGain[gr][channel][window] = bitReader.Bits(3)
+					sideInfo.SubblockGain[granule][channel][window] = bitReader.Bits(3)
 				}
 
 				// TODO: This is not listed on the spec. Is this correct??
-				if sideInfo.BlockType[gr][channel] == 2 && sideInfo.MixedBlockFlag[gr][channel] == 0 {
-					sideInfo.Region0Count[gr][channel] = 8 // Implicit
+				if sideInfo.BlockType[granule][channel] == 2 && sideInfo.MixedBlockFlag[granule][channel] == 0 {
+					sideInfo.Region0Count[granule][channel] = 8 // Implicit
 				} else {
-					sideInfo.Region0Count[gr][channel] = 7 // Implicit
+					sideInfo.Region0Count[granule][channel] = 7 // Implicit
 				}
 				// The standard is wrong on this!!!
 				// Implicit
-				sideInfo.Region1Count[gr][channel] = 20 - sideInfo.Region0Count[gr][channel]
+				sideInfo.Region1Count[granule][channel] = 20 - sideInfo.Region0Count[granule][channel]
 			} else {
 				for region := range 3 {
-					sideInfo.TableSelect[gr][channel][region] = bitReader.Bits(5)
+					sideInfo.TableSelect[granule][channel][region] = bitReader.Bits(5)
 				}
 
-				sideInfo.Region0Count[gr][channel] = bitReader.Bits(4)
-				sideInfo.Region1Count[gr][channel] = bitReader.Bits(3)
+				sideInfo.Region0Count[granule][channel] = bitReader.Bits(4)
+				sideInfo.Region1Count[granule][channel] = bitReader.Bits(3)
 
-				sideInfo.BlockType[gr][channel] = 0 // Implicit
+				sideInfo.BlockType[granule][channel] = 0 // Implicit
 				if !mpeg1Frame {
 					sideInfo.MixedBlockFlag[0][channel] = 0
 				}
 			}
 
 			if mpeg1Frame {
-				sideInfo.Preflag[gr][channel] = bitReader.Bits(1)
+				sideInfo.Preflag[granule][channel] = bitReader.Bits(1)
 			}
 
-			sideInfo.ScalefacScale[gr][channel] = bitReader.Bits(1)
-			sideInfo.Count1TableSelect[gr][channel] = bitReader.Bits(1)
+			sideInfo.ScalefacScale[granule][channel] = bitReader.Bits(1)
+			sideInfo.Count1TableSelect[granule][channel] = bitReader.Bits(1)
 		}
 	}
 

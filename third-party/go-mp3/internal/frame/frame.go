@@ -28,12 +28,10 @@ import (
 	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/sideinfo"
 )
 
-var (
-	powtab34 = make([]float64, 8207)
-	pretab   = []float64{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 3, 3, 3, 2, 0}
-)
+var powtab34 = make([]float64, 8207)                                                                     //nolint:gochecknoglobals // immutable lookup table
+var pretab = []float64{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 3, 3, 3, 2, 0} //nolint:gochecknoglobals // immutable lookup table
 
-func init() {
+func init() { //nolint:gochecknoinits // precomputes lookup table
 	for i := range powtab34 {
 		powtab34[i] = math.Pow(float64(i), 4.0/3.0)
 	}
@@ -126,19 +124,19 @@ func (f *Frame) Decode() []byte {
 	out := make([]byte, f.header.BytesPerFrame())
 
 	nch := f.header.NumberOfChannels()
-	for gr := range f.header.Granules() {
+	for granule := range f.header.Granules() {
 		for ch := range nch {
-			f.requantize(gr, ch)
-			f.reorder(gr, ch)
+			f.requantize(granule, ch)
+			f.reorder(granule, ch)
 		}
 
-		f.stereo(gr)
+		f.stereo(granule)
 
 		for ch := range nch {
-			f.antialias(gr, ch)
-			f.hybridSynthesis(gr, ch)
-			f.frequencyInversion(gr, ch)
-			f.subbandSynthesis(gr, ch, out[consts.SamplesPerGr*4*gr:])
+			f.antialias(granule, ch)
+			f.hybridSynthesis(granule, ch)
+			f.frequencyInversion(granule, ch)
+			f.subbandSynthesis(granule, ch, out[consts.SamplesPerGr*4*granule:])
 		}
 	}
 
@@ -243,9 +241,9 @@ func (f *Frame) requantize(granule, channel int) {
 			winLen := sfBandIndicesShort[sfb+1] -
 				sfBandIndicesShort[sfb]
 
-			for i := 0; i < f.sideInfo.Count1[granule][channel]; /* i++ done below! */ {
+			for idx := 0; idx < f.sideInfo.Count1[granule][channel]; /* idx++ done below! */ {
 				// Check if we're into the next scalefac band
-				if i == nextSfb {
+				if idx == nextSfb {
 					sfb++
 					nextSfb = sfBandIndicesShort[sfb+1] * 3
 					winLen = sfBandIndicesShort[sfb+1] -
@@ -254,8 +252,8 @@ func (f *Frame) requantize(granule, channel int) {
 
 				for win := range 3 {
 					for range winLen {
-						f.requantizeProcessShort(granule, channel, i, sfb, win)
-						i++
+						f.requantizeProcessShort(granule, channel, idx, sfb, win)
+						idx++
 					}
 				}
 			}
@@ -328,7 +326,7 @@ func (f *Frame) reorder(granule, channel int) {
 	}
 }
 
-var isRatios = []float32{0.000000, 0.267949, 0.577350, 1.000000, 1.732051, 3.732051}
+var isRatios = []float32{0.000000, 0.267949, 0.577350, 1.000000, 1.732051, 3.732051} //nolint:gochecknoglobals // immutable lookup table
 
 func (f *Frame) stereoProcessIntensityLong(granule, sfb int) {
 	var isRatioL, isRatioR float32
@@ -355,6 +353,7 @@ func (f *Frame) stereoProcessIntensityLong(granule, sfb int) {
 
 func (f *Frame) stereoProcessIntensityShort(granule, sfb int) {
 	var isRatioL, isRatioR float32
+
 	_, sfBandIndicesShort := getSfBandIndicesArray(&f.header)
 	// The window length
 	winLen := sfBandIndicesShort[sfb+1] - sfBandIndicesShort[sfb]
@@ -445,10 +444,8 @@ func (f *Frame) stereo(granule int) {
 	}
 }
 
-var (
-	antialiasCs = []float32{0.857493, 0.881742, 0.949629, 0.983315, 0.995518, 0.999161, 0.999899, 0.999993}
-	antialiasCa = []float32{-0.514496, -0.471732, -0.313377, -0.181913, -0.094574, -0.040966, -0.014199, -0.003700}
-)
+var antialiasCs = []float32{0.857493, 0.881742, 0.949629, 0.983315, 0.995518, 0.999161, 0.999899, 0.999993}   //nolint:gochecknoglobals // immutable lookup table
+var antialiasCa = []float32{-0.514496, -0.471732, -0.313377, -0.181913, -0.094574, -0.040966, -0.014199, -0.003700} //nolint:gochecknoglobals // immutable lookup table
 
 func (f *Frame) antialias(granule, channel int) {
 	// No antialiasing is done for short blocks
@@ -481,10 +478,10 @@ func (f *Frame) hybridSynthesis(granule, channel int) {
 	// Loop through all 32 subbands
 	for subband := range 32 {
 		// Determine blocktype for this subband
-		bt := f.sideInfo.BlockType[granule][channel]
+		blockType := f.sideInfo.BlockType[granule][channel]
 		if (f.sideInfo.WinSwitchFlag[granule][channel] == 1) &&
 			(f.sideInfo.MixedBlockFlag[granule][channel] == 1) && (subband < 2) {
-			bt = 0
+			blockType = 0
 		}
 		// Do the inverse modified DCT and windowing
 		in := make([]float32, 18)
@@ -492,7 +489,7 @@ func (f *Frame) hybridSynthesis(granule, channel int) {
 			in[i] = f.mainData.Is[granule][channel][subband*18+i]
 		}
 
-		rawout := imdct.Win(in, bt)
+		rawout := imdct.Win(in, blockType)
 		// Overlapp add with stored vector into main_data vector
 		for i := range 18 {
 			f.mainData.Is[granule][channel][subband*18+i] = rawout[i] + f.store[channel][subband][i]
@@ -509,9 +506,9 @@ func (f *Frame) frequencyInversion(granule, channel int) {
 	}
 }
 
-var synthNWin = [64][32]float32{}
+var synthNWin = [64][32]float32{} //nolint:gochecknoglobals // precomputed lookup table
 
-func init() {
+func init() { //nolint:gochecknoinits // precomputes lookup table
 	for i := range 64 {
 		for j := range 32 {
 			synthNWin[i][j] = float32(math.Cos(float64((16+i)*(2*j+1)) * (math.Pi / 64.0)))
@@ -519,7 +516,7 @@ func init() {
 	}
 }
 
-var synthDtbl = [512]float32{
+var synthDtbl = [512]float32{ //nolint:gochecknoglobals // immutable lookup table
 	0.000000000, -0.000015259, -0.000015259, -0.000015259,
 	-0.000015259, -0.000015259, -0.000015259, -0.000030518,
 	-0.000030518, -0.000030518, -0.000030518, -0.000045776,

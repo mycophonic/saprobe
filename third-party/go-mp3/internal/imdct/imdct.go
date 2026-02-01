@@ -18,9 +18,9 @@ import (
 	"math"
 )
 
-var imdctWinData = [4][36]float32{}
+var imdctWinData = [4][36]float32{} //nolint:gochecknoglobals // precomputed lookup table
 
-func init() {
+func init() { //nolint:gochecknoinits // precomputes lookup table
 	for i := range 36 {
 		imdctWinData[0][i] = float32(math.Sin(math.Pi / 36 * (float64(i) + 0.5)))
 	}
@@ -66,9 +66,9 @@ func init() {
 	}
 }
 
-var cosN12 = [6][12]float32{}
+var cosN12 = [6][12]float32{} //nolint:gochecknoglobals // precomputed lookup table
 
-func init() {
+func init() { //nolint:gochecknoinits // precomputes lookup table
 	const N = 12
 
 	for i := range 6 {
@@ -78,9 +78,9 @@ func init() {
 	}
 }
 
-var cosN36 = [18][36]float32{}
+var cosN36 = [18][36]float32{} //nolint:gochecknoglobals // precomputed lookup table
 
-func init() {
+func init() { //nolint:gochecknoinits // precomputes lookup table
 	const N = 36
 
 	for i := range 18 {

@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package mp3
+package mp3_test
 
 import (
 	"bytes"
 	"io"
 	"os"
 	"testing"
+
+	mp3 "github.com/mycophonic/saprobe/third-party/go-mp3"
 )
 
 func BenchmarkDecode(b *testing.B) {
@@ -33,7 +35,7 @@ func BenchmarkDecode(b *testing.B) {
 			b.Fatal(err)
 		}
 
-		d, err := NewDecoder(src)
+		d, err := mp3.NewDecoder(src)
 		if err != nil {
 			b.Fatal(err)
 		}

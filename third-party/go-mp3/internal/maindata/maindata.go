@@ -37,7 +37,7 @@ type MainData struct {
 	Is        [2][2][576]float32 // Huffman coded freq. lines
 }
 
-var scalefacSizesMpeg1 = [16][2]int{
+var scalefacSizesMpeg1 = [16][2]int{ //nolint:gochecknoglobals // immutable lookup table
 	{0, 0},
 	{0, 1},
 	{0, 2},
@@ -56,7 +56,7 @@ var scalefacSizesMpeg1 = [16][2]int{
 	{4, 3},
 }
 
-var scalefacSizesMpeg2 = [3][6][4]int{
+var scalefacSizesMpeg2 = [3][6][4]int{ //nolint:gochecknoglobals // immutable lookup table
 	{
 		{6, 5, 5, 5},
 		{6, 5, 7, 3},
@@ -83,7 +83,7 @@ var scalefacSizesMpeg2 = [3][6][4]int{
 	},
 }
 
-var nSlen2 = initSlen() /* MPEG 2.0 slen for 'normal' mode */
+var nSlen2 = initSlen() //nolint:gochecknoglobals // immutable lookup table (MPEG 2.0 slen for 'normal' mode)
 
 func initSlen() (nSlen2 [512]int) {
 	for i := range 4 {

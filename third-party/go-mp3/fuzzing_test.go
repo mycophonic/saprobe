@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package mp3
+package mp3_test
 
 import (
 	"bytes"
 	"testing"
+
+	mp3 "github.com/mycophonic/saprobe/third-party/go-mp3"
 )
 
 func TestFuzzing(t *testing.T) {
@@ -102,6 +104,6 @@ func TestFuzzing(t *testing.T) {
 	}
 	for _, input := range inputs {
 		b := bytes.NewReader([]byte(input))
-		_, _ = NewDecoder(b)
+		_, _ = mp3.NewDecoder(b)
 	}
 }

@@ -20,7 +20,7 @@ import (
 	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/bits"
 )
 
-var huffmanTable = []uint16{
+var huffmanTable = []uint16{ //nolint:gochecknoglobals // immutable lookup table
 	// 1
 	0x0201, 0x0000, 0x0201, 0x0010, 0x0201, 0x0001, 0x0011,
 	// 2
@@ -308,7 +308,7 @@ type huffTables struct {
 	linbits   int
 }
 
-var huffmanMain = [...]huffTables{
+var huffmanMain = [...]huffTables{ //nolint:gochecknoglobals // immutable lookup table
 	{nil, 0, 0},                    // Table  0
 	{huffmanTable, 7, 0},           // Table  1
 	{huffmanTable[7:], 17, 0},      // Table  2
@@ -399,7 +399,7 @@ func Decode(m *bits.Bits, tableNum int) (x, y, v, w int, err error) {
 		v = (y >> 3) & 1
 		w = (y >> 2) & 1
 		x = (y >> 1) & 1
-		y = y & 1
+		y &= 1
 
 		if (v != 0) && (m.Bit() == 1) {
 			v = -v

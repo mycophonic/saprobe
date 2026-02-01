@@ -49,7 +49,7 @@ func run() error {
 
 	player.Play()
 
-	fmt.Printf("Length: %d[bytes]\n", decoder.Length())
+	fmt.Printf("Length: %d[bytes]\n", decoder.Length()) //nolint:forbidigo // example program
 
 	for {
 		time.Sleep(time.Second)

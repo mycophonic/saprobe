@@ -240,8 +240,11 @@ func (f FrameHeader) FrameSize() (int, error) {
 		return 0, err
 	}
 
-	size := ((144*f.Bitrate())/freq +
-		int(f.PaddingBit())) >> uint(f.LowSamplingFrequency())
+	// MPEG1: 144 * bitrate / freq + padding
+	// MPEG2: 72 * bitrate / freq + padding
+	// The padding bit must be added AFTER the division, not before the shift.
+	size := (144*f.Bitrate()/freq)>>uint(f.LowSamplingFrequency()) +
+		f.PaddingBit()
 
 	return size, nil
 }
