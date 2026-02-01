@@ -32,16 +32,14 @@ type Decoder struct {
 	length        int64
 	frameStarts   []int64
 	buf           []byte
+	decodeBuf     []byte
 	frame         *frame.Frame
 	pos           int64
 	bytesPerFrame int64
 }
 
 func (d *Decoder) readFrame() error {
-	var err error
-
-	d.frame, _, err = frame.Read(d.source, d.source.pos, d.frame)
-	if err != nil {
+	if _, err := d.frame.Read(d.source, d.source.pos); err != nil {
 		if errors.Is(err, io.EOF) {
 			return io.EOF
 		}
@@ -55,7 +53,14 @@ func (d *Decoder) readFrame() error {
 		return err
 	}
 
-	d.buf = append(d.buf, d.frame.Decode()...)
+	needed := d.frame.BytesPerFrame()
+	if cap(d.decodeBuf) < needed {
+		d.decodeBuf = make([]byte, needed)
+	}
+
+	d.decodeBuf = d.decodeBuf[:needed]
+	d.frame.Decode(d.decodeBuf)
+	d.buf = append(d.buf, d.decodeBuf...)
 
 	return nil
 }
@@ -115,7 +120,7 @@ func (d *Decoder) Seek(offset int64, whence int) (int64, error) {
 
 	d.pos = npos
 	d.buf = nil
-	d.frame = nil
+	d.frame = frame.NewFrame()
 
 	// At the very end of the stream there is nothing left to decode.
 	if d.length > 0 && npos >= d.length {
@@ -218,12 +223,7 @@ func (d *Decoder) ensureFrameStartsAndLength() error {
 		d.bytesPerFrame = int64(header.BytesPerFrame())
 		totalLength += d.bytesPerFrame
 
-		framesize, err := header.FrameSize()
-		if err != nil {
-			return err
-		}
-
-		buf := make([]byte, framesize-4)
+		buf := make([]byte, header.FrameSize()-4)
 		if _, err := d.source.ReadFull(buf); err != nil {
 			if errors.Is(err, io.EOF) {
 				break
@@ -263,6 +263,7 @@ func NewDecoder(r io.Reader) (*Decoder, error) {
 	}
 	decoder := &Decoder{
 		source: src,
+		frame:  frame.NewFrame(),
 		length: invalidLength,
 	}
 
@@ -274,12 +275,7 @@ func NewDecoder(r io.Reader) (*Decoder, error) {
 		return nil, err
 	}
 
-	freq, err := decoder.frame.SamplingFrequency()
-	if err != nil {
-		return nil, err
-	}
-
-	decoder.sampleRate = freq
+	decoder.sampleRate = decoder.frame.SampleRateHz()
 
 	if err := decoder.ensureFrameStartsAndLength(); err != nil {
 		return nil, err

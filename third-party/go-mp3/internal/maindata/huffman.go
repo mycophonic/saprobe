@@ -1,17 +1,3 @@
-// Copyright 2017 Hajime Hoshi
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package maindata
 
 import (
@@ -24,9 +10,10 @@ import (
 	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/sideinfo"
 )
 
+//nolint:revive // magic numbers are MPEG spec constants (36=sfb boundary, 572=SamplesPerGr-4, 0.0=zero)
 func readHuffman(
 	bitStream *bits.Reader,
-	header frameheader.FrameHeader,
+	header *frameheader.Header,
 	sideInfo *sideinfo.SideInfo,
 	mainData *MainData,
 	part2Start, granule, channel int,
@@ -55,7 +42,7 @@ func readHuffman(
 
 		regionIdx := sideInfo.Region0Count[granule][channel] + 1
 		if regionIdx < 0 || len(sfBandLong) <= regionIdx {
-			// TODO: Better error messages (#3)
+			//nolint:err113 // runtime value in error message required for debugging
 			return fmt.Errorf("mp3: readHuffman failed: invalid index i: %d", regionIdx)
 		}
 
@@ -63,32 +50,35 @@ func readHuffman(
 
 		regionEndIdx := sideInfo.Region0Count[granule][channel] + sideInfo.Region1Count[granule][channel] + 2
 		if regionEndIdx < 0 || len(sfBandLong) <= regionEndIdx {
-			// TODO: Better error messages (#3)
+			//nolint:err113 // runtime value in error message required for debugging
 			return fmt.Errorf("mp3: readHuffman failed: invalid index j: %d", regionEndIdx)
 		}
 
 		region2Start = sfBandLong[regionEndIdx]
 	}
+	// Initialize bit cache for Huffman decoding (amortized across all decode calls).
+	bitCache := huffman.NewBitCache(bitStream)
+
 	// Read big_values using tables according to region_x_start
 	for isPos := 0; isPos < sideInfo.BigValues[granule][channel]*2; isPos++ {
 		// #22
 		if isPos >= len(mainData.Is[granule][channel]) {
+			//nolint:err113 // runtime value in error message required for debugging
 			return fmt.Errorf("mp3: isPos was too big: %d", isPos)
 		}
 
 		var tableNum int
-		if isPos < region1Start {
+
+		switch {
+		case isPos < region1Start:
 			tableNum = sideInfo.TableSelect[granule][channel][0]
-		} else if isPos < region2Start {
+		case isPos < region2Start:
 			tableNum = sideInfo.TableSelect[granule][channel][1]
-		} else {
+		default:
 			tableNum = sideInfo.TableSelect[granule][channel][2]
 		}
 		// Get next Huffman coded words
-		x, freqLineY, _, _, err := huffman.Decode(bitStream, tableNum)
-		if err != nil {
-			return err
-		}
+		x, freqLineY := huffman.DecodePair(&bitCache, tableNum)
 		// In the big_values area there are two freq lines per Huffman word
 		mainData.Is[granule][channel][isPos] = float32(x)
 		isPos++
@@ -99,12 +89,9 @@ func readHuffman(
 	tableNum := sideInfo.Count1TableSelect[granule][channel] + 32
 
 	isPos := sideInfo.BigValues[granule][channel] * 2
-	for isPos <= 572 && bitStream.BitPos() <= bitPosEnd {
+	for isPos <= 572 && bitCache.BitPos() <= bitPosEnd {
 		// Get next Huffman coded words
-		freqLineX, freqLineY, v, freqLineW, err := huffman.Decode(bitStream, tableNum)
-		if err != nil {
-			return err
-		}
+		v, freqLineW, freqLineX, freqLineY := huffman.DecodeQuad(&bitCache, tableNum)
 
 		mainData.Is[granule][channel][isPos] = float32(v)
 
@@ -131,7 +118,7 @@ func readHuffman(
 		isPos++
 	}
 	// Check that we didn't read past the end of this section
-	if bitStream.BitPos() > (bitPosEnd + 1) {
+	if bitCache.BitPos() > (bitPosEnd + 1) {
 		// Remove last words read
 		isPos -= 4
 	}
@@ -141,7 +128,7 @@ func readHuffman(
 	}
 
 	// Setup count1 which is the index of the first sample in the rzero reg.
-	sideInfo.Count1[granule][channel] = isPos
+	mainData.Count1[granule][channel] = isPos
 
 	// Zero out the last part if necessary
 	for isPos < consts.SamplesPerGr {

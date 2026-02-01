@@ -172,6 +172,16 @@ func (r *Reader) Skip(count int) {
 	r.pos += count
 }
 
+// Reset reinitializes the Reader to operate on a new byte slice,
+// starting at bit position 0 with no error. This allows reuse of a
+// stack-allocated Reader without calling [NewReader].
+// The slice is not copied; the caller must not modify it during reads.
+func (r *Reader) Reset(data []byte) {
+	r.data = data
+	r.pos = 0
+	r.err = nil
+}
+
 // Err returns the first error encountered during reading, or nil.
 func (r *Reader) Err() error {
 	return r.err

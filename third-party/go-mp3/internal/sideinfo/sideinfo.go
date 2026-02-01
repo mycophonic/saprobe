@@ -1,17 +1,3 @@
-// Copyright 2017 Hajime Hoshi
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package sideinfo
 
 import (
@@ -19,21 +5,14 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/bits"
 	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/consts"
 	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/frameheader"
 )
-
-// FullReader is an interface for reading complete byte slices.
-type FullReader interface {
-	ReadFull(buf []byte) (int, error)
-}
 
 // A SideInfo is MPEG1 Layer 3 Side Information.
 // [2][2] means [gr][ch].
 type SideInfo struct {
 	MainDataBegin    int       // 9 bits
-	PrivateBits      int       // 3 bits in mono, 5 in stereo
 	Scfsi            [2][4]int // 1 bit
 	Part2And3Length  [2][2]int // 12 bits
 	BigValues        [2][2]int // 9 bits
@@ -52,7 +31,33 @@ type SideInfo struct {
 	Preflag           [2][2]int // 1 bit
 	ScalefacScale     [2][2]int // 1 bit
 	Count1TableSelect [2][2]int // 1 bit
-	Count1            [2][2]int // Not in file, calc by huffman decoder
+}
+
+// bitReader reads bits MSB-first from a fixed [32]byte buffer.
+// Stack-allocated; no heap escapes.
+type bitReader struct {
+	buf [32]byte
+	pos int
+}
+
+func (r *bitReader) readBits(count int) int {
+	// Load up to 5 bytes into a uint64 accumulator.
+	byteIdx := r.pos >> 3
+	bitOff := uint(r.pos & 7) //nolint:gosec // pos is always non-negative
+
+	var acc uint64
+
+	for i := range min(32-byteIdx, 5) {
+		shift := (7 - i) * 8                           // 56, 48, 40, 32, 24
+		acc |= uint64(r.buf[byteIdx+i]) << uint(shift) //nolint:gosec // byteIdx+i validated by min bound
+	}
+
+	acc <<= bitOff
+	//nolint:gosec // count is 1..12; no overflow risk
+	result := int(acc >> uint(64-count))
+	r.pos += count
+
+	return result
 }
 
 var sideInfoBitsToRead = [2][4]int{ //nolint:gochecknoglobals // immutable lookup table
@@ -64,109 +69,103 @@ var sideInfoBitsToRead = [2][4]int{ //nolint:gochecknoglobals // immutable looku
 	},
 }
 
-// Read reads and parses the side information from an MP3 frame.
-func Read(source FullReader, header frameheader.FrameHeader) (*SideInfo, error) {
-	nch := header.NumberOfChannels()
-
-	framesize, err := header.FrameSize()
-	if err != nil {
-		return nil, err
-	}
-
-	if framesize > 2000 {
-		return nil, fmt.Errorf("mp3: framesize = %d\n", framesize)
-	}
+// Read reads and parses the side information from an MP3 frame into dst.
+// The caller provides dst (typically embedded in Frame as a value field).
+// dst is fully overwritten for active granules/channels.
+//
+//nolint:revive // cognitive complexity mirrors the spec's branching structure
+func Read(source consts.FullReader, header *frameheader.Header, dst *SideInfo) error {
+	nch := header.Channels()
 
 	sideInfoSize := header.SideInfoSize()
 
-	// Read sideinfo from bitstream into buffer used by Bits()
-	buf := make([]byte, sideInfoSize)
+	// Stack-local buffer and bit reader — zero heap allocations.
+	var reader bitReader
 
-	n, err := source.ReadFull(buf)
+	n, err := source.ReadFull(reader.buf[:sideInfoSize])
 	if n < sideInfoSize {
 		if errors.Is(err, io.EOF) {
-			return nil, &consts.UnexpectedEOF{At: "sideinfo.Read"}
+			return &consts.UnexpectedEOF{At: "sideinfo2.Read"}
 		}
 
-		return nil, fmt.Errorf("mp3: couldn't read sideinfo %d bytes: %w", sideInfoSize, err)
+		return fmt.Errorf("mp3: couldn't read sideinfo %d bytes: %w", sideInfoSize, err)
 	}
-
-	bitReader := bits.NewReader(buf)
 
 	mpeg1Frame := header.LowSamplingFrequency() == 0
 	bitsToRead := sideInfoBitsToRead[header.LowSamplingFrequency()]
 
-	// Parse audio data
 	// Pointer to where we should start reading main data
-	sideInfo := &SideInfo{}
-	sideInfo.MainDataBegin = bitReader.ReadBits(bitsToRead[0])
-	// Get private bits. Not used for anything.
+	dst.MainDataBegin = reader.readBits(bitsToRead[0])
+
+	// Get private bits. Not used for anything — read to advance position, discard value.
 	if header.Mode() == consts.ModeSingleChannel {
-		sideInfo.PrivateBits = bitReader.ReadBits(bitsToRead[1])
+		_ = reader.readBits(bitsToRead[1])
 	} else {
-		sideInfo.PrivateBits = bitReader.ReadBits(bitsToRead[2])
+		_ = reader.readBits(bitsToRead[2])
 	}
 
 	if mpeg1Frame {
 		// Get scale factor selection information
 		for channel := range nch {
 			for scfsiBand := range 4 {
-				sideInfo.Scfsi[channel][scfsiBand] = bitReader.ReadBits(1)
+				dst.Scfsi[channel][scfsiBand] = reader.readBits(1)
 			}
 		}
 	}
+
 	// Get the rest of the side information
 	for granule := range header.Granules() {
 		for channel := range nch {
-			sideInfo.Part2And3Length[granule][channel] = bitReader.ReadBits(12)
-			sideInfo.BigValues[granule][channel] = bitReader.ReadBits(9)
-			sideInfo.GlobalGain[granule][channel] = bitReader.ReadBits(8)
-			sideInfo.ScalefacCompress[granule][channel] = bitReader.ReadBits(bitsToRead[3])
+			dst.Part2And3Length[granule][channel] = reader.readBits(12) //nolint:revive // MPEG spec bit width
+			dst.BigValues[granule][channel] = reader.readBits(9)
+			dst.GlobalGain[granule][channel] = reader.readBits(8)
+			//nolint:gosec // bitsToRead is [4]int, index 3 always valid
+			dst.ScalefacCompress[granule][channel] = reader.readBits(bitsToRead[3])
 
-			sideInfo.WinSwitchFlag[granule][channel] = bitReader.ReadBits(1)
-			if sideInfo.WinSwitchFlag[granule][channel] == 1 {
-				sideInfo.BlockType[granule][channel] = bitReader.ReadBits(2)
+			dst.WinSwitchFlag[granule][channel] = reader.readBits(1)
+			if dst.WinSwitchFlag[granule][channel] == 1 {
+				dst.BlockType[granule][channel] = reader.readBits(2)
 
-				sideInfo.MixedBlockFlag[granule][channel] = bitReader.ReadBits(1)
+				dst.MixedBlockFlag[granule][channel] = reader.readBits(1)
 				for region := range 2 {
-					sideInfo.TableSelect[granule][channel][region] = bitReader.ReadBits(5)
+					dst.TableSelect[granule][channel][region] = reader.readBits(5)
 				}
 
 				for window := range 3 {
-					sideInfo.SubblockGain[granule][channel][window] = bitReader.ReadBits(3)
+					dst.SubblockGain[granule][channel][window] = reader.readBits(3)
 				}
 
 				// TODO: This is not listed on the spec. Is this correct??
-				if sideInfo.BlockType[granule][channel] == 2 && sideInfo.MixedBlockFlag[granule][channel] == 0 {
-					sideInfo.Region0Count[granule][channel] = 8 // Implicit
+				if dst.BlockType[granule][channel] == 2 && dst.MixedBlockFlag[granule][channel] == 0 {
+					dst.Region0Count[granule][channel] = 8 // Implicit
 				} else {
-					sideInfo.Region0Count[granule][channel] = 7 // Implicit
+					dst.Region0Count[granule][channel] = 7 // Implicit
 				}
 				// The standard is wrong on this!!!
 				// Implicit
-				sideInfo.Region1Count[granule][channel] = 20 - sideInfo.Region0Count[granule][channel]
+				dst.Region1Count[granule][channel] = 20 - dst.Region0Count[granule][channel]
 			} else {
 				for region := range 3 {
-					sideInfo.TableSelect[granule][channel][region] = bitReader.ReadBits(5)
+					dst.TableSelect[granule][channel][region] = reader.readBits(5)
 				}
 
-				sideInfo.Region0Count[granule][channel] = bitReader.ReadBits(4)
-				sideInfo.Region1Count[granule][channel] = bitReader.ReadBits(3)
+				dst.Region0Count[granule][channel] = reader.readBits(4)
+				dst.Region1Count[granule][channel] = reader.readBits(3)
 
-				sideInfo.BlockType[granule][channel] = 0 // Implicit
+				dst.BlockType[granule][channel] = 0 // Implicit
 				if !mpeg1Frame {
-					sideInfo.MixedBlockFlag[0][channel] = 0
+					dst.MixedBlockFlag[0][channel] = 0
 				}
 			}
 
 			if mpeg1Frame {
-				sideInfo.Preflag[granule][channel] = bitReader.ReadBits(1)
+				dst.Preflag[granule][channel] = reader.readBits(1)
 			}
 
-			sideInfo.ScalefacScale[granule][channel] = bitReader.ReadBits(1)
-			sideInfo.Count1TableSelect[granule][channel] = bitReader.ReadBits(1)
+			dst.ScalefacScale[granule][channel] = reader.readBits(1)
+			dst.Count1TableSelect[granule][channel] = reader.readBits(1)
 		}
 	}
 
-	return sideInfo, nil
+	return nil
 }

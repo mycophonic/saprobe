@@ -75,6 +75,11 @@ const (
 	SamplingFrequencyReserved SamplingFrequency = 3
 )
 
+// FullReader is an interface for reading complete byte slices.
+type FullReader interface {
+	ReadFull(buf []byte) (int, error)
+}
+
 // Scale factor band index type constants.
 const (
 	SfBandIndicesLong  = 0

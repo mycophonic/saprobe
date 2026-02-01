@@ -1,17 +1,3 @@
-// Copyright 2017 Hajime Hoshi
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package maindata
 
 import (
@@ -25,16 +11,23 @@ import (
 	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/sideinfo"
 )
 
-// FullReader is an interface for reading complete byte slices.
-type FullReader interface {
-	ReadFull(buf []byte) (int, error)
-}
-
 // MainData contains the decoded MPEG Layer 3 main data including scale factors and frequency lines.
 type MainData struct {
 	ScalefacL [2][2][22]int      // 0-4 bits
 	ScalefacS [2][2][13][3]int   // 0-4 bits
 	Is        [2][2][576]float32 // Huffman coded freq. lines
+	Count1    [2][2]int          // set by Huffman decoder, not parsed from bitstream
+}
+
+// Reservoir manages the bit reservoir for main data across frames.
+// The MP3 format allows frames to reference main data bytes from previous frames
+// via the MainDataBegin pointer in side information.
+//
+// Max buffer: 511 (MPEG1 MainDataBegin) + 1405 (max main data) = 1916 bytes normal.
+// 4096 provides margin for the insufficient-reservoir append path.
+type Reservoir struct {
+	buf [4096]byte
+	len int
 }
 
 var scalefacSizesMpeg1 = [16][2]int{ //nolint:gochecknoglobals // immutable lookup table
@@ -85,11 +78,12 @@ var scalefacSizesMpeg2 = [3][6][4]int{ //nolint:gochecknoglobals // immutable lo
 
 var nSlen2 = initSlen() //nolint:gochecknoglobals // immutable lookup table (MPEG 2.0 slen for 'normal' mode)
 
+//nolint:revive // magic numbers are MPEG2 slen lookup table indices from the spec
 func initSlen() (nSlen2 [512]int) {
 	for i := range 4 {
 		for j := range 3 {
 			n := j + i*3
-			nSlen2[n+500] = i | (j << 3) | (2 << 12) | (1 << 15)
+			nSlen2[n+500] = i | (j << 3) | (2 << 12) | (1 << 15) //nolint:gosec // max n+500 = 2+3*3+500 = 511
 		}
 	}
 
@@ -98,7 +92,7 @@ func initSlen() (nSlen2 [512]int) {
 			for k := range 4 {
 				for l := range 4 {
 					n := l + k*4 + j*16 + i*80
-					nSlen2[n] = i | (j << 3) | (k << 6) | (l << 9) | (0 << 12)
+					nSlen2[n] = i | (j << 3) | (k << 6) | (l << 9) | (0 << 12) //nolint:gosec // max n = 3+12+64+320 = 399
 				}
 			}
 		}
@@ -108,7 +102,7 @@ func initSlen() (nSlen2 [512]int) {
 		for j := range 5 {
 			for k := range 4 {
 				n := k + j*4 + i*20
-				nSlen2[n+400] = i | (j << 3) | (k << 6) | (1 << 12)
+				nSlen2[n+400] = i | (j << 3) | (k << 6) | (1 << 12) //nolint:gosec // max n+400 = 3+16+80+400 = 499
 			}
 		}
 	}
@@ -116,57 +110,180 @@ func initSlen() (nSlen2 [512]int) {
 	return nSlen2
 }
 
-// Read reads and parses the main data from an MP3 frame.
+// Read reads and parses the main data from an MP3 frame into dst.
+// The caller provides dst (typically embedded in Frame as a value field)
+// and res (the persistent bit reservoir, also embedded in Frame).
 func Read(
-	source FullReader,
-	prev *bits.Reader,
-	header frameheader.FrameHeader,
+	source consts.FullReader,
+	header *frameheader.Header,
 	sideInfo *sideinfo.SideInfo,
-) (*MainData, *bits.Reader, error) {
-	nch := header.NumberOfChannels()
-	// Calculate header audio data size
-	framesize, err := header.FrameSize()
-	if err != nil {
-		return nil, nil, err
-	}
+	dst *MainData,
+	res *Reservoir,
+) error {
+	nch := header.Channels()
 
-	if framesize > 2000 {
-		return nil, nil, fmt.Errorf("mp3: framesize = %d", framesize)
-	}
-
-	sideInfoSize := header.SideInfoSize()
-
-	// Main data size is the rest of the frame,including ancillary data
-	mainDataSize := framesize - sideInfoSize - 4 // sync+header
-	// CRC is 2 bytes
-	if header.ProtectionBit() == 0 {
+	// Main data size is the frame minus header (4 bytes), side info, and optional CRC (2 bytes).
+	mainDataSize := header.FrameSize() - header.SideInfoSize() - 4
+	if header.Protected() {
 		mainDataSize -= 2
 	}
-	// Assemble main data buffer with data from this frame and the previous
-	// two frames. main_data_begin indicates how many bytes from previous
-	// frames that should be used. This buffer is later accessed by the
-	// Bits function in the same way as the side info is.
-	bitStream, err := read(source, prev, mainDataSize, sideInfo.MainDataBegin)
-	if err != nil {
-		// This could be due to not enough data in reservoir
-		return nil, nil, err
+
+	offset := sideInfo.MainDataBegin
+
+	// Build the bitstream from reservoir tail + current frame data.
+	if offset > res.len {
+		// Insufficient reservoir — append current data and proceed.
+		// The bitstream position won't align with MainDataBegin, but we replicate
+		// the original behavior for compatibility.
+		// TODO: Define a special error and enable skipping to the next frame.
+		count, err := source.ReadFull(res.buf[res.len : res.len+mainDataSize])
+		if count < mainDataSize {
+			if errors.Is(err, io.EOF) {
+				return &consts.UnexpectedEOF{At: "maindata2.Read (1)"}
+			}
+
+			return fmt.Errorf("mp3: maindata2.Read (1): %w", err)
+		}
+
+		res.len += mainDataSize
+	} else {
+		// Normal path: shift reservoir tail to start of buffer, then read current data.
+		tailStart := res.len - offset
+		copy(res.buf[:offset], res.buf[tailStart:res.len])
+
+		count, err := source.ReadFull(res.buf[offset : offset+mainDataSize])
+		if count < mainDataSize {
+			if errors.Is(err, io.EOF) {
+				return &consts.UnexpectedEOF{At: "maindata2.Read (2)"}
+			}
+
+			return fmt.Errorf("mp3: maindata2.Read (2): %w", err)
+		}
+
+		res.len = offset + mainDataSize
 	}
+
+	// Stack-local bit reader over the reservoir buffer — zero heap allocation.
+	var reader bits.Reader
+	reader.Reset(res.buf[:res.len])
 
 	if header.LowSamplingFrequency() == 1 {
-		return getScaleFactorsMpeg2(bitStream, header, sideInfo)
+		return getScaleFactorsMpeg2(&reader, header, sideInfo, dst)
 	}
 
-	return getScaleFactorsMpeg1(nch, bitStream, header, sideInfo)
+	return getScaleFactorsMpeg1(nch, &reader, header, sideInfo, dst)
 }
 
+//nolint:revive // cognitive complexity mirrors the MPEG1 spec's branching structure
+func getScaleFactorsMpeg1(
+	nch int,
+	bitStream *bits.Reader,
+	header *frameheader.Header,
+	sideInfo *sideinfo.SideInfo,
+	dst *MainData,
+) error {
+	for granule := range 2 {
+		for channel := range nch {
+			part2Start := bitStream.BitPos()
+			// Number of bits in the bitstream for the bands
+			slen1 := scalefacSizesMpeg1[sideInfo.ScalefacCompress[granule][channel]][0]
+
+			slen2 := scalefacSizesMpeg1[sideInfo.ScalefacCompress[granule][channel]][1]
+			if sideInfo.WinSwitchFlag[granule][channel] == 1 && sideInfo.BlockType[granule][channel] == 2 {
+				if sideInfo.MixedBlockFlag[granule][channel] != 0 {
+					for sfb := range 8 {
+						dst.ScalefacL[granule][channel][sfb] = bitStream.ReadBits(slen1)
+					}
+
+					for sfb := 3; sfb < 12; sfb++ {
+						// slen1 for band 3-5, slen2 for 6-11
+						nbits := slen2
+						if sfb < 6 {
+							nbits = slen1
+						}
+
+						for win := range 3 {
+							dst.ScalefacS[granule][channel][sfb][win] = bitStream.ReadBits(nbits)
+						}
+					}
+				} else {
+					for sfb := range 12 {
+						// slen1 for band 3-5, slen2 for 6-11
+						nbits := slen2
+						if sfb < 6 {
+							nbits = slen1
+						}
+
+						for win := range 3 {
+							dst.ScalefacS[granule][channel][sfb][win] = bitStream.ReadBits(nbits)
+						}
+					}
+				}
+			} else {
+				// Scale factor bands 0-5
+				if sideInfo.Scfsi[channel][0] == 0 || granule == 0 {
+					for sfb := range 6 {
+						dst.ScalefacL[granule][channel][sfb] = bitStream.ReadBits(slen1)
+					}
+				} else if sideInfo.Scfsi[channel][0] == 1 && granule == 1 {
+					// Copy scalefactors from granule 0 to granule 1
+					// TODO: This is not listed on the spec.
+					for sfb := range 6 {
+						dst.ScalefacL[1][channel][sfb] = dst.ScalefacL[0][channel][sfb]
+					}
+				}
+				// Scale factor bands 6-10
+				if sideInfo.Scfsi[channel][1] == 0 || granule == 0 {
+					for sfb := 6; sfb < 11; sfb++ {
+						dst.ScalefacL[granule][channel][sfb] = bitStream.ReadBits(slen1)
+					}
+				} else if sideInfo.Scfsi[channel][1] == 1 && granule == 1 {
+					// Copy scalefactors from granule 0 to granule 1
+					for sfb := 6; sfb < 11; sfb++ {
+						dst.ScalefacL[1][channel][sfb] = dst.ScalefacL[0][channel][sfb]
+					}
+				}
+				// Scale factor bands 11-15
+				if sideInfo.Scfsi[channel][2] == 0 || granule == 0 {
+					for sfb := 11; sfb < 16; sfb++ {
+						dst.ScalefacL[granule][channel][sfb] = bitStream.ReadBits(slen2)
+					}
+				} else if sideInfo.Scfsi[channel][2] == 1 && granule == 1 {
+					// Copy scalefactors from granule 0 to granule 1
+					for sfb := 11; sfb < 16; sfb++ {
+						dst.ScalefacL[1][channel][sfb] = dst.ScalefacL[0][channel][sfb]
+					}
+				}
+				// Scale factor bands 16-20
+				if sideInfo.Scfsi[channel][3] == 0 || granule == 0 {
+					for sfb := 16; sfb < 21; sfb++ {
+						dst.ScalefacL[granule][channel][sfb] = bitStream.ReadBits(slen2)
+					}
+				} else if sideInfo.Scfsi[channel][3] == 1 && granule == 1 {
+					// Copy scalefactors from granule 0 to granule 1
+					for sfb := 16; sfb < 21; sfb++ {
+						dst.ScalefacL[1][channel][sfb] = dst.ScalefacL[0][channel][sfb]
+					}
+				}
+			}
+			// Read Huffman coded data. Skip stuffing bits.
+			if err := readHuffman(bitStream, header, sideInfo, dst, part2Start, granule, channel); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+//nolint:revive,varnamelen // cognitive complexity and short names mirror the MPEG2 spec
 func getScaleFactorsMpeg2(
 	bitStream *bits.Reader,
-	header frameheader.FrameHeader,
+	header *frameheader.Header,
 	sideInfo *sideinfo.SideInfo,
-) (*MainData, *bits.Reader, error) {
-	nch := header.NumberOfChannels()
-
-	mainData := &MainData{}
+	dst *MainData,
+) error {
+	nch := header.Channels()
 
 	for channel := range nch {
 		part2Start := bitStream.BitPos()
@@ -182,9 +299,12 @@ func getScaleFactorsMpeg2(
 			}
 		}
 
-		var scaleFactors []int
-
 		d := (slen >> 12) & 0x7
+
+		// Stack-local array replaces dynamic append.
+		var sf [45]int
+
+		sfIdx := 0
 
 		for idx := range 4 {
 			num := slen & 0x7
@@ -192,179 +312,43 @@ func getScaleFactorsMpeg2(
 
 			if num > 0 {
 				for range scalefacSizesMpeg2[blockTypeIdx][d][idx] {
-					scaleFactors = append(scaleFactors, bitStream.ReadBits(num))
+					sf[sfIdx] = bitStream.ReadBits(num) //nolint:gosec // sfIdx bounded by table sums (max 41)
+					sfIdx++
 				}
 
 				numbits += scalefacSizesMpeg2[blockTypeIdx][d][idx] * num
 			} else {
 				for range scalefacSizesMpeg2[blockTypeIdx][d][idx] {
-					scaleFactors = append(scaleFactors, 0)
+					// sf[sfIdx] is already 0
+					sfIdx++
 				}
 			}
 		}
 
-		blockTypeIdx = (blockTypeIdx << 1) + 1
-		for range blockTypeIdx {
-			scaleFactors = append(scaleFactors, 0)
-		}
+		// Trailing zeros for block type alignment.
+		trailingZeros := (blockTypeIdx << 1) + 1
+		sfIdx += trailingZeros
+		_ = numbits
 
-		if len(scaleFactors) == 22 {
+		if sfIdx == 22 { //nolint:revive // 22 is the MPEG2 long-block scale factor count per spec
 			for idx := range 22 {
-				mainData.ScalefacL[0][channel][idx] = scaleFactors[idx]
+				//nolint:gosec // idx bounded by range 22; sf is [45]int
+				dst.ScalefacL[0][channel][idx] = sf[idx]
 			}
 		} else {
 			for x := range 13 {
 				for idx := range 3 {
-					mainData.ScalefacS[0][channel][x][idx] = scaleFactors[(x*3)+idx]
+					//nolint:gosec // max (x*3)+idx = 12*3+2 = 38; sf is [45]int
+					dst.ScalefacS[0][channel][x][idx] = sf[(x*3)+idx]
 				}
 			}
 		}
 
 		// Read Huffman coded data. Skip stuffing bits.
-		if err := readHuffman(bitStream, header, sideInfo, mainData, part2Start, 0, channel); err != nil {
-			return nil, nil, err
+		if err := readHuffman(bitStream, header, sideInfo, dst, part2Start, 0, channel); err != nil {
+			return err
 		}
 	}
-	// The ancillary data is stored here,but we ignore it.
-	return mainData, bitStream, nil
-}
 
-func getScaleFactorsMpeg1(
-	nch int,
-	bitStream *bits.Reader,
-	header frameheader.FrameHeader,
-	sideInfo *sideinfo.SideInfo,
-) (*MainData, *bits.Reader, error) {
-	mainData := &MainData{}
-
-	for granule := range 2 {
-		for channel := range nch {
-			part2Start := bitStream.BitPos()
-			// Number of bits in the bitstream for the bands
-			slen1 := scalefacSizesMpeg1[sideInfo.ScalefacCompress[granule][channel]][0]
-
-			slen2 := scalefacSizesMpeg1[sideInfo.ScalefacCompress[granule][channel]][1]
-			if sideInfo.WinSwitchFlag[granule][channel] == 1 && sideInfo.BlockType[granule][channel] == 2 {
-				if sideInfo.MixedBlockFlag[granule][channel] != 0 {
-					for sfb := range 8 {
-						mainData.ScalefacL[granule][channel][sfb] = bitStream.ReadBits(slen1)
-					}
-
-					for sfb := 3; sfb < 12; sfb++ {
-						// slen1 for band 3-5,slen2 for 6-11
-						nbits := slen2
-						if sfb < 6 {
-							nbits = slen1
-						}
-
-						for win := range 3 {
-							mainData.ScalefacS[granule][channel][sfb][win] = bitStream.ReadBits(nbits)
-						}
-					}
-				} else {
-					for sfb := range 12 {
-						// slen1 for band 3-5,slen2 for 6-11
-						nbits := slen2
-						if sfb < 6 {
-							nbits = slen1
-						}
-
-						for win := range 3 {
-							mainData.ScalefacS[granule][channel][sfb][win] = bitStream.ReadBits(nbits)
-						}
-					}
-				}
-			} else {
-				// Scale factor bands 0-5
-				if sideInfo.Scfsi[channel][0] == 0 || granule == 0 {
-					for sfb := range 6 {
-						mainData.ScalefacL[granule][channel][sfb] = bitStream.ReadBits(slen1)
-					}
-				} else if sideInfo.Scfsi[channel][0] == 1 && granule == 1 {
-					// Copy scalefactors from granule 0 to granule 1
-					// TODO: This is not listed on the spec.
-					for sfb := range 6 {
-						mainData.ScalefacL[1][channel][sfb] = mainData.ScalefacL[0][channel][sfb]
-					}
-				}
-				// Scale factor bands 6-10
-				if sideInfo.Scfsi[channel][1] == 0 || granule == 0 {
-					for sfb := 6; sfb < 11; sfb++ {
-						mainData.ScalefacL[granule][channel][sfb] = bitStream.ReadBits(slen1)
-					}
-				} else if sideInfo.Scfsi[channel][1] == 1 && granule == 1 {
-					// Copy scalefactors from granule 0 to granule 1
-					for sfb := 6; sfb < 11; sfb++ {
-						mainData.ScalefacL[1][channel][sfb] = mainData.ScalefacL[0][channel][sfb]
-					}
-				}
-				// Scale factor bands 11-15
-				if sideInfo.Scfsi[channel][2] == 0 || granule == 0 {
-					for sfb := 11; sfb < 16; sfb++ {
-						mainData.ScalefacL[granule][channel][sfb] = bitStream.ReadBits(slen2)
-					}
-				} else if sideInfo.Scfsi[channel][2] == 1 && granule == 1 {
-					// Copy scalefactors from granule 0 to granule 1
-					for sfb := 11; sfb < 16; sfb++ {
-						mainData.ScalefacL[1][channel][sfb] = mainData.ScalefacL[0][channel][sfb]
-					}
-				}
-				// Scale factor bands 16-20
-				if sideInfo.Scfsi[channel][3] == 0 || granule == 0 {
-					for sfb := 16; sfb < 21; sfb++ {
-						mainData.ScalefacL[granule][channel][sfb] = bitStream.ReadBits(slen2)
-					}
-				} else if sideInfo.Scfsi[channel][3] == 1 && granule == 1 {
-					// Copy scalefactors from granule 0 to granule 1
-					for sfb := 16; sfb < 21; sfb++ {
-						mainData.ScalefacL[1][channel][sfb] = mainData.ScalefacL[0][channel][sfb]
-					}
-				}
-			}
-			// Read Huffman coded data. Skip stuffing bits.
-			if err := readHuffman(bitStream, header, sideInfo, mainData, part2Start, granule, channel); err != nil {
-				return nil, nil, err
-			}
-		}
-	}
-	// The ancillary data is stored here,but we ignore it.
-	return mainData, bitStream, nil
-}
-
-func read(source FullReader, prev *bits.Reader, size, offset int) (*bits.Reader, error) {
-	if size > 1500 {
-		return nil, fmt.Errorf("mp3: size = %d", size)
-	}
-	// Check that there's data available from previous frames if needed
-	if prev != nil && offset > prev.Len() {
-		// No, there is not, so we skip decoding this frame, but we have to
-		// read the main_data bits from the bitstream in case they are needed
-		// for decoding the next frame.
-		buf := make([]byte, size)
-		if n, err := source.ReadFull(buf); n < size {
-			if errors.Is(err, io.EOF) {
-				return nil, &consts.UnexpectedEOF{At: "maindata.Read (1)"}
-			}
-
-			return nil, err
-		}
-		// TODO: Define a special error and enable to continue the next frame.
-		return bits.NewReader(append(prev.Bytes(), buf...)), nil
-	}
-	// Copy data from previous frames
-	vec := []byte{}
-	if prev != nil {
-		vec = prev.Tail(offset)
-	}
-	// Read the main_data from file
-	buf := make([]byte, size)
-	if n, err := source.ReadFull(buf); n < size {
-		if errors.Is(err, io.EOF) {
-			return nil, &consts.UnexpectedEOF{At: "maindata.Read (2)"}
-		}
-
-		return nil, err
-	}
-
-	return bits.NewReader(append(vec, buf...)), nil
+	return nil
 }

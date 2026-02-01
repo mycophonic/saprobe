@@ -1,2 +1,2 @@
-// Package frameheader implements MPEG audio frame header parsing.
+// Package frameheader implements parsed, validated MPEG audio frame headers.
 package frameheader

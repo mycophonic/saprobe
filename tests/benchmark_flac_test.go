@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	benchIterations = 20
+	benchIterations = 10
 	benchDuration   = 10 // seconds of audio
 )
 
