@@ -134,15 +134,35 @@ func (r *Reader) Tail(count int) []byte {
 
 // PeekBits reads count bits without advancing the position or affecting error state.
 // This is used by Huffman decoders that need to look ahead before deciding how many
-// bits to consume.
+// bits to consume. Returns 0 if there is a sticky error, count is 0 or > 32, or
+// insufficient data remains.
 func (r *Reader) PeekBits(count int) int {
-	savedPos := r.pos
-	savedErr := r.err
-	result := r.ReadBits(count)
-	r.pos = savedPos
-	r.err = savedErr
+	if count == 0 || count > 32 || r.err != nil {
+		return 0
+	}
 
-	return result
+	byteIdx := r.pos >> 3
+	//nolint:gosec // pos is always non-negative; no overflow risk
+	bitOff := uint(r.pos & 7)
+
+	endByte := (r.pos + count - 1) >> 3
+	if endByte >= len(r.data) {
+		return 0
+	}
+
+	var acc uint64
+
+	remaining := min(len(r.data)-byteIdx, 5)
+	for idx := range remaining {
+		shift := (7 - idx) * 8
+		//nolint:gosec // idx is 0..4, shift is always non-negative
+		acc |= uint64(r.data[byteIdx+idx]) << uint(shift)
+	}
+
+	acc <<= bitOff
+
+	//nolint:gosec // count is 1..32; no overflow risk
+	return int(acc >> uint(64-count))
 }
 
 // Skip advances the bit position by count bits without reading data.

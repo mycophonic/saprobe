@@ -23,7 +23,7 @@ import (
 	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/bits"
 	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/consts"
 	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/frameheader"
-	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/imdct2"
+	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/imdct"
 	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/maindata"
 	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/sideinfo"
 )
@@ -32,7 +32,7 @@ var (
 	powtab34 = make(
 		[]float64,
 		8207,
-	) //nolint:gochecknoglobals // immutable lookup table
+	)
 	pretab = []float64{
 		0,
 		0,
@@ -56,7 +56,7 @@ var (
 		3,
 		2,
 		0,
-	} //nolint:gochecknoglobals // immutable lookup table
+	}
 )
 
 func init() { //nolint:gochecknoinits // precomputes lookup table
@@ -361,7 +361,7 @@ var isRatios = []float32{
 	1.000000,
 	1.732051,
 	3.732051,
-} //nolint:gochecknoglobals // immutable lookup table
+}
 
 func (f *Frame) stereoProcessIntensityLong(granule, sfb int) {
 	var isRatioL, isRatioR float32
@@ -489,7 +489,7 @@ var (
 		0.999161,
 		0.999899,
 		0.999993,
-	} //nolint:gochecknoglobals // immutable lookup table
+	}
 	antialiasCa = []float32{
 		-0.514496,
 		-0.471732,
@@ -499,7 +499,7 @@ var (
 		-0.040966,
 		-0.014199,
 		-0.003700,
-	} //nolint:gochecknoglobals // immutable lookup table
+	}
 )
 
 func (f *Frame) antialias(granule, channel int) {
@@ -549,7 +549,7 @@ func (f *Frame) hybridSynthesis(granule, channel int) {
 			freqIn[i] = f.mainData.Is[granule][channel][off+i]
 		}
 
-		imdct2.Win(&freqIn, blockType, &rawout)
+		imdct.Win(&freqIn, blockType, &rawout)
 		// Overlap add with stored vector into main_data vector
 		for i := range 18 {
 			f.mainData.Is[granule][channel][off+i] = rawout[i] + f.store[channel][subband][i]

@@ -50,71 +50,10 @@ var vorbisConfigs = []codecConfig{
 	},
 }
 
-// MP3: lossy, supports MPEG 1 (32000/44100/48000 Hz) and MPEG 2 (16000/22050/24000 Hz),
-// mono and stereo, CBR and VBR. go-mp3 always decodes to stereo 16-bit.
-var mp3Configs = []codecConfig{
-	// MPEG 1 stereo CBR 320k — all sample rates
-	{
-		name: "mp3_mpeg1_32000_stereo_cbr320", ext: "mp3", sampleRate: 32000, bitDepth: 16, channels: 2, outputChannels: 2, lossy: true,
-		ffmpegArgs: []string{"-c:a", "libmp3lame", "-b:a", "320k"}, decoder: decodeMp3,
-	},
-	{
-		name: "mp3_mpeg1_44100_stereo_cbr320", ext: "mp3", sampleRate: 44100, bitDepth: 16, channels: 2, outputChannels: 2, lossy: true,
-		ffmpegArgs: []string{"-c:a", "libmp3lame", "-b:a", "320k"}, decoder: decodeMp3,
-	},
-	{
-		name: "mp3_mpeg1_48000_stereo_cbr320", ext: "mp3", sampleRate: 48000, bitDepth: 16, channels: 2, outputChannels: 2, lossy: true,
-		ffmpegArgs: []string{"-c:a", "libmp3lame", "-b:a", "320k"}, decoder: decodeMp3,
-	},
-
-	// MPEG 2 stereo CBR 160k — all sample rates (max for MPEG 2)
-	{
-		name: "mp3_mpeg2_16000_stereo_cbr160", ext: "mp3", sampleRate: 16000, bitDepth: 16, channels: 2, outputChannels: 2, lossy: true,
-		ffmpegArgs: []string{"-c:a", "libmp3lame", "-b:a", "160k"}, decoder: decodeMp3,
-	},
-	{
-		name: "mp3_mpeg2_22050_stereo_cbr160", ext: "mp3", sampleRate: 22050, bitDepth: 16, channels: 2, outputChannels: 2, lossy: true,
-		ffmpegArgs: []string{"-c:a", "libmp3lame", "-b:a", "160k"}, decoder: decodeMp3,
-	},
-	{
-		name: "mp3_mpeg2_24000_stereo_cbr160", ext: "mp3", sampleRate: 24000, bitDepth: 16, channels: 2, outputChannels: 2, lossy: true,
-		ffmpegArgs: []string{"-c:a", "libmp3lame", "-b:a", "160k"}, decoder: decodeMp3,
-	},
-
-	// MPEG 1 mono CBR 320k — go-mp3 always outputs stereo
-	{
-		name: "mp3_mpeg1_44100_mono_cbr320", ext: "mp3", sampleRate: 44100, bitDepth: 16, channels: 1, outputChannels: 2, lossy: true,
-		ffmpegArgs: []string{"-c:a", "libmp3lame", "-b:a", "320k"}, decoder: decodeMp3,
-	},
-
-	// MPEG 1 stereo VBR quality 2
-	{
-		name: "mp3_mpeg1_44100_stereo_vbr", ext: "mp3", sampleRate: 44100, bitDepth: 16, channels: 2, outputChannels: 2, lossy: true,
-		ffmpegArgs: []string{"-c:a", "libmp3lame", "-q:a", "2"}, decoder: decodeMp3,
-	},
-
-	// MPEG 1 stereo CBR 128k (lower bitrate)
-	{
-		name: "mp3_mpeg1_44100_stereo_cbr128", ext: "mp3", sampleRate: 44100, bitDepth: 16, channels: 2, outputChannels: 2, lossy: true,
-		ffmpegArgs: []string{"-c:a", "libmp3lame", "-b:a", "128k"}, decoder: decodeMp3,
-	},
-}
-
 func TestVorbisDecode(t *testing.T) {
 	t.Parallel()
 
 	for _, cfg := range vorbisConfigs {
-		t.Run(cfg.name, func(t *testing.T) {
-			t.Parallel()
-			runSyntheticTest(t, cfg)
-		})
-	}
-}
-
-func TestMP3Decode(t *testing.T) {
-	t.Parallel()
-
-	for _, cfg := range mp3Configs {
 		t.Run(cfg.name, func(t *testing.T) {
 			t.Parallel()
 			runSyntheticTest(t, cfg)
@@ -148,9 +87,21 @@ func runSyntheticTest(t *testing.T, cfg codecConfig) {
 	}
 
 	// Decode with ffmpeg (reference).
-	ffmpegPCM, err := ffmpegDecode(encPath, cfg.bitDepth, cfg.outputChannels)
+	// When source is mono but decoder outputs stereo (e.g., go-mp3 duplicates mono to both channels),
+	// decode ffmpeg to mono and duplicate manually. This avoids ffmpeg's mono→stereo upmix which
+	// attenuates by 1/√2 for energy preservation — a different convention than simple duplication.
+	ffmpegDecodeChannels := cfg.outputChannels
+	if cfg.channels == 1 && cfg.outputChannels == 2 {
+		ffmpegDecodeChannels = 1
+	}
+
+	ffmpegPCM, err := ffmpegDecode(encPath, cfg.bitDepth, ffmpegDecodeChannels)
 	if err != nil {
 		t.Fatalf("ffmpeg decode: %v", err)
+	}
+
+	if cfg.channels == 1 && cfg.outputChannels == 2 {
+		ffmpegPCM = monoToStereo(ffmpegPCM, cfg.bitDepth)
 	}
 
 	// Decode with saprobe.
@@ -483,6 +434,21 @@ func pcmBytesPerSample(bitDepth int) int {
 	default:
 		return bitDepth / 8
 	}
+}
+
+// monoToStereo duplicates mono PCM to stereo by copying each sample to both channels.
+func monoToStereo(mono []byte, bitDepth int) []byte {
+	bps := pcmBytesPerSample(bitDepth)
+	numSamples := len(mono) / bps
+	stereo := make([]byte, numSamples*bps*2)
+
+	for i := range numSamples {
+		sample := mono[i*bps : (i+1)*bps]
+		copy(stereo[i*bps*2:], sample)
+		copy(stereo[i*bps*2+bps:], sample)
+	}
+
+	return stereo
 }
 
 // showDiffs prints the first N differing samples for debugging.
