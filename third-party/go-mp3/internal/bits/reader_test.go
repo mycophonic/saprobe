@@ -1,10 +1,10 @@
-package bit2_test
+package bits_test
 
 import (
 	"errors"
 	"testing"
 
-	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/bit2"
+	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/bits"
 )
 
 func TestReadBits_MatchesOriginal(t *testing.T) {
@@ -16,7 +16,7 @@ func TestReadBits_MatchesOriginal(t *testing.T) {
 	b3 := byte(204) // 11001100
 	b4 := byte(51)  // 00110011
 
-	r := bit2.NewReader([]byte{b1, b2, b3, b4})
+	r := bits.NewReader([]byte{b1, b2, b3, b4})
 
 	if got := r.ReadBits(1); got != 0 {
 		t.Fatalf("ReadBits(1) = %d, want 0", got)
@@ -49,7 +49,7 @@ func TestReadBit(t *testing.T) {
 	t.Parallel()
 
 	// 0xA5 = 10100101
-	r := bit2.NewReader([]byte{0xA5})
+	r := bits.NewReader([]byte{0xA5})
 
 	want := []int{1, 0, 1, 0, 0, 1, 0, 1}
 	for idx, w := range want {
@@ -62,7 +62,7 @@ func TestReadBit(t *testing.T) {
 func TestReadBits_Zero(t *testing.T) {
 	t.Parallel()
 
-	r := bit2.NewReader([]byte{0xFF})
+	r := bits.NewReader([]byte{0xFF})
 
 	if got := r.ReadBits(0); got != 0 {
 		t.Fatalf("ReadBits(0) = %d, want 0", got)
@@ -77,7 +77,7 @@ func TestReadBits_Zero(t *testing.T) {
 func TestReadBits_FullByte(t *testing.T) {
 	t.Parallel()
 
-	r := bit2.NewReader([]byte{0xDE, 0xAD})
+	r := bits.NewReader([]byte{0xDE, 0xAD})
 
 	if got := r.ReadBits(8); got != 0xDE {
 		t.Fatalf("ReadBits(8) = 0x%X, want 0xDE", got)
@@ -91,7 +91,7 @@ func TestReadBits_FullByte(t *testing.T) {
 func TestReadBits_Full32(t *testing.T) {
 	t.Parallel()
 
-	r := bit2.NewReader([]byte{0xDE, 0xAD, 0xBE, 0xEF})
+	r := bits.NewReader([]byte{0xDE, 0xAD, 0xBE, 0xEF})
 
 	if got := r.ReadBits(32); got != 0xDEADBEEF {
 		t.Fatalf("ReadBits(32) = 0x%X, want 0xDEADBEEF", got)
@@ -102,7 +102,7 @@ func TestReadBits_32_Unaligned(t *testing.T) {
 	t.Parallel()
 
 	// Read 4 bits, then 32 bits spanning 5 bytes.
-	r := bit2.NewReader([]byte{0xFD, 0xEA, 0xDB, 0xEE, 0xF0})
+	r := bits.NewReader([]byte{0xFD, 0xEA, 0xDB, 0xEE, 0xF0})
 
 	// First 4 bits of 0xFD = 1111 = 15
 	if got := r.ReadBits(4); got != 0xF {
@@ -121,7 +121,7 @@ func TestReadBits_CrossByteBoundary(t *testing.T) {
 	t.Parallel()
 
 	// 0xFF 0x00 = 11111111 00000000
-	r := bit2.NewReader([]byte{0xFF, 0x00})
+	r := bits.NewReader([]byte{0xFF, 0x00})
 
 	// Read 4 bits: 1111 = 15
 	if got := r.ReadBits(4); got != 15 {
@@ -137,7 +137,7 @@ func TestReadBits_CrossByteBoundary(t *testing.T) {
 func TestReadBits_PastEnd_ReturnsZeroAndSetsError(t *testing.T) {
 	t.Parallel()
 
-	r := bit2.NewReader([]byte{0xFF})
+	r := bits.NewReader([]byte{0xFF})
 
 	// Read 8 bits — OK
 	r.ReadBits(8)
@@ -159,7 +159,7 @@ func TestReadBits_PastEnd_ReturnsZeroAndSetsError(t *testing.T) {
 func TestReadBit_PastEnd(t *testing.T) {
 	t.Parallel()
 
-	r := bit2.NewReader([]byte{})
+	r := bits.NewReader([]byte{})
 
 	if got := r.ReadBit(); got != 0 {
 		t.Fatalf("ReadBit() on empty = %d, want 0", got)
@@ -173,7 +173,7 @@ func TestReadBit_PastEnd(t *testing.T) {
 func TestReadBits_StickyError(t *testing.T) {
 	t.Parallel()
 
-	r := bit2.NewReader([]byte{0xFF})
+	r := bits.NewReader([]byte{0xFF})
 	r.ReadBits(8)
 	r.ReadBits(1) // triggers error
 
@@ -190,13 +190,13 @@ func TestReadBits_StickyError(t *testing.T) {
 func TestReadBits_Overflow(t *testing.T) {
 	t.Parallel()
 
-	r := bit2.NewReader([]byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF})
+	r := bits.NewReader([]byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF})
 
 	if got := r.ReadBits(33); got != 0 {
 		t.Fatalf("ReadBits(33) = %d, want 0", got)
 	}
 
-	if !errors.Is(r.Err(), bit2.ErrOverflow) {
+	if !errors.Is(r.Err(), bits.ErrOverflow) {
 		t.Fatalf("Err() = %v, want ErrOverflow", r.Err())
 	}
 }
@@ -204,7 +204,7 @@ func TestReadBits_Overflow(t *testing.T) {
 func TestBitPos(t *testing.T) {
 	t.Parallel()
 
-	r := bit2.NewReader([]byte{0xFF, 0xFF})
+	r := bits.NewReader([]byte{0xFF, 0xFF})
 
 	if got := r.BitPos(); got != 0 {
 		t.Fatalf("initial BitPos() = %d, want 0", got)
@@ -226,7 +226,7 @@ func TestBitPos(t *testing.T) {
 func TestSetBitPos(t *testing.T) {
 	t.Parallel()
 
-	r := bit2.NewReader([]byte{0xAB, 0xCD})
+	r := bits.NewReader([]byte{0xAB, 0xCD})
 
 	r.ReadBits(8) // consume first byte
 
@@ -240,7 +240,7 @@ func TestSetBitPos(t *testing.T) {
 func TestSetBitPos_ClearsError(t *testing.T) {
 	t.Parallel()
 
-	r := bit2.NewReader([]byte{0xFF})
+	r := bits.NewReader([]byte{0xFF})
 
 	r.ReadBits(8)
 	r.ReadBits(1) // error
@@ -264,7 +264,7 @@ func TestLen(t *testing.T) {
 	t.Parallel()
 
 	data := []byte{1, 2, 3, 4, 5}
-	r := bit2.NewReader(data)
+	r := bits.NewReader(data)
 
 	if got := r.Len(); got != 5 {
 		t.Fatalf("Len() = %d, want 5", got)
@@ -275,7 +275,7 @@ func TestBytes(t *testing.T) {
 	t.Parallel()
 
 	data := []byte{0xDE, 0xAD}
-	r := bit2.NewReader(data)
+	r := bits.NewReader(data)
 
 	got := r.Bytes()
 	if len(got) != 2 || got[0] != 0xDE || got[1] != 0xAD {
@@ -286,7 +286,7 @@ func TestBytes(t *testing.T) {
 func TestTail(t *testing.T) {
 	t.Parallel()
 
-	r := bit2.NewReader([]byte{0x01, 0x02, 0x03, 0x04})
+	r := bits.NewReader([]byte{0x01, 0x02, 0x03, 0x04})
 
 	got := r.Tail(2)
 	if len(got) != 2 || got[0] != 0x03 || got[1] != 0x04 {
@@ -300,7 +300,7 @@ func TestReadBits_9Bit_Field(t *testing.T) {
 	// Simulate reading a 9-bit big_values field from MP3 side info.
 	// 0x01 0x80 = 00000001 10000000
 	// 9 bits = 000000011 = 3
-	r := bit2.NewReader([]byte{0x01, 0x80})
+	r := bits.NewReader([]byte{0x01, 0x80})
 
 	if got := r.ReadBits(9); got != 3 {
 		t.Fatalf("ReadBits(9) = %d, want 3", got)
@@ -317,7 +317,7 @@ func TestReadBits_AllWidths(t *testing.T) {
 	}
 
 	for width := 1; width <= 32; width++ {
-		r := bit2.NewReader(data)
+		r := bits.NewReader(data)
 		want := (1 << width) - 1
 
 		if got := r.ReadBits(width); got != want {
@@ -330,7 +330,7 @@ func TestReadBits_SequentialSmallReads(t *testing.T) {
 	t.Parallel()
 
 	// 0b10110100 = 0xB4
-	r := bit2.NewReader([]byte{0xB4})
+	r := bits.NewReader([]byte{0xB4})
 
 	// Read as 2+3+3 = 8 bits
 	// 10 = 2
@@ -347,10 +347,103 @@ func TestReadBits_SequentialSmallReads(t *testing.T) {
 	}
 }
 
+func TestPeekBits_DoesNotAdvance(t *testing.T) {
+	t.Parallel()
+
+	r := bits.NewReader([]byte{0xAB, 0xCD})
+
+	got := r.PeekBits(8)
+	if got != 0xAB {
+		t.Fatalf("PeekBits(8) = 0x%X, want 0xAB", got)
+	}
+
+	if pos := r.BitPos(); pos != 0 {
+		t.Fatalf("BitPos() after PeekBits = %d, want 0", pos)
+	}
+
+	// Reading again should give the same result.
+	if got := r.ReadBits(8); got != 0xAB {
+		t.Fatalf("ReadBits(8) after PeekBits = 0x%X, want 0xAB", got)
+	}
+}
+
+func TestPeekBits_DoesNotAffectError(t *testing.T) {
+	t.Parallel()
+
+	r := bits.NewReader([]byte{0xFF})
+
+	// Peek past end should not set sticky error.
+	got := r.PeekBits(16)
+	if got != 0 {
+		t.Fatalf("PeekBits(16) past end = %d, want 0", got)
+	}
+
+	if r.Err() != nil {
+		t.Fatalf("PeekBits should not set sticky error, got %v", r.Err())
+	}
+
+	// Should still be able to read normally.
+	if got := r.ReadBits(8); got != 0xFF {
+		t.Fatalf("ReadBits(8) after failed PeekBits = 0x%X, want 0xFF", got)
+	}
+}
+
+func TestPeekBits_PartialWidth(t *testing.T) {
+	t.Parallel()
+
+	// 0xB4 = 10110100
+	r := bits.NewReader([]byte{0xB4})
+	r.ReadBits(2) // consume "10", now at bit 2
+
+	// Peek 5 bits: 11010 = 26
+	if got := r.PeekBits(5); got != 26 {
+		t.Fatalf("PeekBits(5) = %d, want 26", got)
+	}
+
+	// Position unchanged.
+	if pos := r.BitPos(); pos != 2 {
+		t.Fatalf("BitPos() = %d, want 2", pos)
+	}
+}
+
+func TestSkip(t *testing.T) {
+	t.Parallel()
+
+	r := bits.NewReader([]byte{0xAB, 0xCD})
+
+	r.Skip(8)
+
+	if pos := r.BitPos(); pos != 8 {
+		t.Fatalf("BitPos() after Skip(8) = %d, want 8", pos)
+	}
+
+	if got := r.ReadBits(8); got != 0xCD {
+		t.Fatalf("ReadBits(8) after Skip = 0x%X, want 0xCD", got)
+	}
+}
+
+func TestSkip_DoesNotClearError(t *testing.T) {
+	t.Parallel()
+
+	r := bits.NewReader([]byte{0xFF})
+	r.ReadBits(8)
+	r.ReadBits(1) // triggers error
+
+	if r.Err() == nil {
+		t.Fatal("expected error before Skip")
+	}
+
+	r.Skip(0) // Skip should NOT clear error
+
+	if r.Err() == nil {
+		t.Fatal("expected error to persist after Skip")
+	}
+}
+
 func TestNewReader_Nil(t *testing.T) {
 	t.Parallel()
 
-	r := bit2.NewReader(nil)
+	r := bits.NewReader(nil)
 
 	if got := r.Len(); got != 0 {
 		t.Fatalf("Len() on nil = %d, want 0", got)

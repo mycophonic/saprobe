@@ -1,8 +1,4 @@
-// Package bit2 provides a zero-allocation, MSB-first bit reader over a byte slice.
-//
-// It is used for parsing MPEG audio bitstreams where fields are packed at arbitrary
-// bit boundaries (e.g., 9-bit big_values, 4-bit scalefac_compress).
-package bit2
+package bits
 
 import "errors"
 
@@ -134,6 +130,26 @@ func (r *Reader) Bytes() []byte {
 // Panics if count > Len().
 func (r *Reader) Tail(count int) []byte {
 	return r.data[len(r.data)-count:]
+}
+
+// PeekBits reads count bits without advancing the position or affecting error state.
+// This is used by Huffman decoders that need to look ahead before deciding how many
+// bits to consume.
+func (r *Reader) PeekBits(count int) int {
+	savedPos := r.pos
+	savedErr := r.err
+	result := r.ReadBits(count)
+	r.pos = savedPos
+	r.err = savedErr
+
+	return result
+}
+
+// Skip advances the bit position by count bits without reading data.
+// It does not check bounds or modify the sticky error; the next read will
+// detect underflow naturally if the position is past the end.
+func (r *Reader) Skip(count int) {
+	r.pos += count
 }
 
 // Err returns the first error encountered during reading, or nil.
