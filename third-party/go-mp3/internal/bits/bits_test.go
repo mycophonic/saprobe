@@ -17,7 +17,7 @@ package bits_test
 import (
 	"testing"
 
-	"github.com/farcloser/saprobe/third-party/go-mp3/internal/bits"
+	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/bits"
 )
 
 func TestBits(t *testing.T) {

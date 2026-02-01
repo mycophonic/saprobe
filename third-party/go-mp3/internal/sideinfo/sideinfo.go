@@ -19,9 +19,9 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/farcloser/saprobe/third-party/go-mp3/internal/bits"
-	"github.com/farcloser/saprobe/third-party/go-mp3/internal/consts"
-	"github.com/farcloser/saprobe/third-party/go-mp3/internal/frameheader"
+	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/bits"
+	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/consts"
+	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/frameheader"
 )
 
 // FullReader is an interface for reading complete byte slices.

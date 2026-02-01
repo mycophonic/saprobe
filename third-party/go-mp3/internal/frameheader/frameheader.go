@@ -16,10 +16,9 @@ package frameheader
 
 import (
 	"errors"
-	"fmt"
 	"io"
 
-	"github.com/farcloser/saprobe/third-party/go-mp3/internal/consts"
+	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/consts"
 )
 
 // FrameHeader is an MPEG1 Layer 1-3 frame header.
@@ -139,6 +138,9 @@ func (f FrameHeader) Granules() int {
 }
 
 // IsValid returns a boolean value indicating whether the header is valid or not.
+// This function drives the sync scanner loop — any header failing IsValid() causes
+// the scanner to slide forward and retry. All conditions that this decoder cannot
+// handle must be checked here so false syncs are skipped automatically.
 func (f FrameHeader) IsValid() bool {
 	const sync = 0xffe00000
 	if (f & sync) != sync {
@@ -149,7 +151,17 @@ func (f FrameHeader) IsValid() bool {
 		return false
 	}
 
+	// MPEG 2.5 is not supported by this decoder.
+	if f.ID() == consts.Version2_5 {
+		return false
+	}
+
 	if f.BitrateIndex() == 15 {
+		return false
+	}
+
+	// Free bitrate (index 0) is not supported by this decoder.
+	if f.BitrateIndex() == 0 {
 		return false
 	}
 
@@ -158,6 +170,11 @@ func (f FrameHeader) IsValid() bool {
 	}
 
 	if f.Layer() == consts.LayerReserved {
+		return false
+	}
+
+	// Only Layer III is supported by this decoder.
+	if f.Layer() != consts.Layer3 {
 		return false
 	}
 
@@ -307,11 +324,7 @@ func Read(source FullReader, position int64) (h FrameHeader, startPosition int64
 
 	// If we get here we've found the sync word, and can decode the header
 	// which is in the low 20 bits of the 32-bit sync+header word.
-
-	if header.BitrateIndex() == 0 {
-		return 0, 0, fmt.Errorf("mp3: free bitrate format is not supported. Header word is 0x%08x at position %d",
-			header, position)
-	}
+	// Free bitrate, non-Layer3, and MPEG 2.5 are already rejected by IsValid().
 
 	return header, position, nil
 }

@@ -20,12 +20,12 @@ import (
 	"io"
 	"math"
 
-	"github.com/farcloser/saprobe/third-party/go-mp3/internal/bits"
-	"github.com/farcloser/saprobe/third-party/go-mp3/internal/consts"
-	"github.com/farcloser/saprobe/third-party/go-mp3/internal/frameheader"
-	"github.com/farcloser/saprobe/third-party/go-mp3/internal/imdct"
-	"github.com/farcloser/saprobe/third-party/go-mp3/internal/maindata"
-	"github.com/farcloser/saprobe/third-party/go-mp3/internal/sideinfo"
+	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/bits"
+	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/consts"
+	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/frameheader"
+	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/imdct"
+	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/maindata"
+	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/sideinfo"
 )
 
 var (
@@ -81,13 +81,8 @@ func Read(source FullReader, position int64, prev *Frame) (frame *Frame, startPo
 		}
 	}
 
-	if header.ID() == consts.Version2_5 {
-		return nil, 0, errors.New("mp3: MPEG version 2.5 is not supported")
-	}
-
-	if header.Layer() != consts.Layer3 {
-		return nil, 0, fmt.Errorf("mp3: only layer3 (want %d; got %d) is supported", consts.Layer3, header.Layer())
-	}
+	// MPEG 2.5, non-Layer3, and free bitrate are already rejected by
+	// frameheader.IsValid(), so the sync scanner skips past them.
 
 	sideInfo, err := sideinfo.Read(source, header)
 	if err != nil {
@@ -248,7 +243,7 @@ func (f *Frame) requantize(granule, channel int) {
 			winLen := sfBandIndicesShort[sfb+1] -
 				sfBandIndicesShort[sfb]
 
-			for i := 0; i < int(f.sideInfo.Count1[granule][channel]); /* i++ done below! */ {
+			for i := 0; i < f.sideInfo.Count1[granule][channel]; /* i++ done below! */ {
 				// Check if we're into the next scalefac band
 				if i == nextSfb {
 					sfb++
@@ -269,13 +264,13 @@ func (f *Frame) requantize(granule, channel int) {
 		sfb := 0
 
 		nextSfb := sfBandIndicesLong[sfb+1]
-		for i := range f.sideInfo.Count1[granule][channel] {
-			if i == nextSfb {
+		for idx := range f.sideInfo.Count1[granule][channel] {
+			if idx == nextSfb {
 				sfb++
 				nextSfb = sfBandIndicesLong[sfb+1]
 			}
 
-			f.requantizeProcessLong(granule, channel, i, sfb)
+			f.requantizeProcessLong(granule, channel, idx, sfb)
 		}
 	}
 }

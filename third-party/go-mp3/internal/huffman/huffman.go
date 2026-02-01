@@ -17,7 +17,7 @@ package huffman
 import (
 	"fmt"
 
-	"github.com/farcloser/saprobe/third-party/go-mp3/internal/bits"
+	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/bits"
 )
 
 var huffmanTable = []uint16{

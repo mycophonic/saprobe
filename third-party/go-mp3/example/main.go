@@ -22,7 +22,7 @@ import (
 
 	"github.com/hajimehoshi/oto/v2"
 
-	"github.com/farcloser/saprobe/third-party/go-mp3"
+	"github.com/mycophonic/saprobe/third-party/go-mp3"
 )
 
 func run() error {

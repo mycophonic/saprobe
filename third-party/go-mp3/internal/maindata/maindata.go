@@ -19,10 +19,10 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/farcloser/saprobe/third-party/go-mp3/internal/bits"
-	"github.com/farcloser/saprobe/third-party/go-mp3/internal/consts"
-	"github.com/farcloser/saprobe/third-party/go-mp3/internal/frameheader"
-	"github.com/farcloser/saprobe/third-party/go-mp3/internal/sideinfo"
+	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/bits"
+	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/consts"
+	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/frameheader"
+	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/sideinfo"
 )
 
 // FullReader is an interface for reading complete byte slices.
@@ -160,7 +160,7 @@ func Read(
 }
 
 func getScaleFactorsMpeg2(
-	m *bits.Bits,
+	bitStream *bits.Bits,
 	header frameheader.FrameHeader,
 	sideInfo *sideinfo.SideInfo,
 ) (*MainData, *bits.Bits, error) {
@@ -168,16 +168,16 @@ func getScaleFactorsMpeg2(
 
 	mainData := &MainData{}
 
-	for ch := range nch {
-		part2Start := m.BitPos()
+	for channel := range nch {
+		part2Start := bitStream.BitPos()
 		numbits := 0
-		slen := nSlen2[sideInfo.ScalefacCompress[0][ch]]
-		sideInfo.Preflag[0][ch] = (slen >> 15) & 0x1
+		slen := nSlen2[sideInfo.ScalefacCompress[0][channel]]
+		sideInfo.Preflag[0][channel] = (slen >> 15) & 0x1
 
 		blockTypeIdx := 0
-		if sideInfo.BlockType[0][ch] == 2 {
+		if sideInfo.BlockType[0][channel] == 2 {
 			blockTypeIdx++
-			if sideInfo.MixedBlockFlag[0][ch] != 0 {
+			if sideInfo.MixedBlockFlag[0][channel] != 0 {
 				blockTypeIdx++
 			}
 		}
@@ -186,68 +186,68 @@ func getScaleFactorsMpeg2(
 
 		d := (slen >> 12) & 0x7
 
-		for i := range 4 {
+		for idx := range 4 {
 			num := slen & 0x7
 			slen >>= 3
 
 			if num > 0 {
-				for j := 0; j < scalefacSizesMpeg2[blockTypeIdx][d][i]; j++ {
-					scaleFactors = append(scaleFactors, m.Bits(num))
+				for range scalefacSizesMpeg2[blockTypeIdx][d][idx] {
+					scaleFactors = append(scaleFactors, bitStream.Bits(num))
 				}
 
-				numbits += scalefacSizesMpeg2[blockTypeIdx][d][i] * num
+				numbits += scalefacSizesMpeg2[blockTypeIdx][d][idx] * num
 			} else {
-				for j := 0; j < scalefacSizesMpeg2[blockTypeIdx][d][i]; j++ {
+				for range scalefacSizesMpeg2[blockTypeIdx][d][idx] {
 					scaleFactors = append(scaleFactors, 0)
 				}
 			}
 		}
 
 		blockTypeIdx = (blockTypeIdx << 1) + 1
-		for i := 0; i < blockTypeIdx; i++ {
+		for range blockTypeIdx {
 			scaleFactors = append(scaleFactors, 0)
 		}
 
 		if len(scaleFactors) == 22 {
-			for i := range 22 {
-				mainData.ScalefacL[0][ch][i] = scaleFactors[i]
+			for idx := range 22 {
+				mainData.ScalefacL[0][channel][idx] = scaleFactors[idx]
 			}
 		} else {
 			for x := range 13 {
-				for i := range 3 {
-					mainData.ScalefacS[0][ch][x][i] = scaleFactors[(x*3)+i]
+				for idx := range 3 {
+					mainData.ScalefacS[0][channel][x][idx] = scaleFactors[(x*3)+idx]
 				}
 			}
 		}
 
 		// Read Huffman coded data. Skip stuffing bits.
-		if err := readHuffman(m, header, sideInfo, mainData, part2Start, 0, ch); err != nil {
+		if err := readHuffman(bitStream, header, sideInfo, mainData, part2Start, 0, channel); err != nil {
 			return nil, nil, err
 		}
 	}
 	// The ancillary data is stored here,but we ignore it.
-	return mainData, m, nil
+	return mainData, bitStream, nil
 }
 
 func getScaleFactorsMpeg1(
 	nch int,
-	m *bits.Bits,
+	bitStream *bits.Bits,
 	header frameheader.FrameHeader,
 	sideInfo *sideinfo.SideInfo,
 ) (*MainData, *bits.Bits, error) {
 	mainData := &MainData{}
 
-	for gr := range 2 {
-		for ch := range nch {
-			part2Start := m.BitPos()
+	for granule := range 2 {
+		for channel := range nch {
+			part2Start := bitStream.BitPos()
 			// Number of bits in the bitstream for the bands
-			slen1 := scalefacSizesMpeg1[sideInfo.ScalefacCompress[gr][ch]][0]
+			slen1 := scalefacSizesMpeg1[sideInfo.ScalefacCompress[granule][channel]][0]
 
-			slen2 := scalefacSizesMpeg1[sideInfo.ScalefacCompress[gr][ch]][1]
-			if sideInfo.WinSwitchFlag[gr][ch] == 1 && sideInfo.BlockType[gr][ch] == 2 {
-				if sideInfo.MixedBlockFlag[gr][ch] != 0 {
+			slen2 := scalefacSizesMpeg1[sideInfo.ScalefacCompress[granule][channel]][1]
+			if sideInfo.WinSwitchFlag[granule][channel] == 1 && sideInfo.BlockType[granule][channel] == 2 {
+				if sideInfo.MixedBlockFlag[granule][channel] != 0 {
 					for sfb := range 8 {
-						mainData.ScalefacL[gr][ch][sfb] = m.Bits(slen1)
+						mainData.ScalefacL[granule][channel][sfb] = bitStream.Bits(slen1)
 					}
 
 					for sfb := 3; sfb < 12; sfb++ {
@@ -258,7 +258,7 @@ func getScaleFactorsMpeg1(
 						}
 
 						for win := range 3 {
-							mainData.ScalefacS[gr][ch][sfb][win] = m.Bits(nbits)
+							mainData.ScalefacS[granule][channel][sfb][win] = bitStream.Bits(nbits)
 						}
 					}
 				} else {
@@ -270,65 +270,65 @@ func getScaleFactorsMpeg1(
 						}
 
 						for win := range 3 {
-							mainData.ScalefacS[gr][ch][sfb][win] = m.Bits(nbits)
+							mainData.ScalefacS[granule][channel][sfb][win] = bitStream.Bits(nbits)
 						}
 					}
 				}
 			} else {
 				// Scale factor bands 0-5
-				if sideInfo.Scfsi[ch][0] == 0 || gr == 0 {
+				if sideInfo.Scfsi[channel][0] == 0 || granule == 0 {
 					for sfb := range 6 {
-						mainData.ScalefacL[gr][ch][sfb] = m.Bits(slen1)
+						mainData.ScalefacL[granule][channel][sfb] = bitStream.Bits(slen1)
 					}
-				} else if sideInfo.Scfsi[ch][0] == 1 && gr == 1 {
+				} else if sideInfo.Scfsi[channel][0] == 1 && granule == 1 {
 					// Copy scalefactors from granule 0 to granule 1
 					// TODO: This is not listed on the spec.
 					for sfb := range 6 {
-						mainData.ScalefacL[1][ch][sfb] = mainData.ScalefacL[0][ch][sfb]
+						mainData.ScalefacL[1][channel][sfb] = mainData.ScalefacL[0][channel][sfb]
 					}
 				}
 				// Scale factor bands 6-10
-				if sideInfo.Scfsi[ch][1] == 0 || gr == 0 {
+				if sideInfo.Scfsi[channel][1] == 0 || granule == 0 {
 					for sfb := 6; sfb < 11; sfb++ {
-						mainData.ScalefacL[gr][ch][sfb] = m.Bits(slen1)
+						mainData.ScalefacL[granule][channel][sfb] = bitStream.Bits(slen1)
 					}
-				} else if sideInfo.Scfsi[ch][1] == 1 && gr == 1 {
+				} else if sideInfo.Scfsi[channel][1] == 1 && granule == 1 {
 					// Copy scalefactors from granule 0 to granule 1
 					for sfb := 6; sfb < 11; sfb++ {
-						mainData.ScalefacL[1][ch][sfb] = mainData.ScalefacL[0][ch][sfb]
+						mainData.ScalefacL[1][channel][sfb] = mainData.ScalefacL[0][channel][sfb]
 					}
 				}
 				// Scale factor bands 11-15
-				if sideInfo.Scfsi[ch][2] == 0 || gr == 0 {
+				if sideInfo.Scfsi[channel][2] == 0 || granule == 0 {
 					for sfb := 11; sfb < 16; sfb++ {
-						mainData.ScalefacL[gr][ch][sfb] = m.Bits(slen2)
+						mainData.ScalefacL[granule][channel][sfb] = bitStream.Bits(slen2)
 					}
-				} else if sideInfo.Scfsi[ch][2] == 1 && gr == 1 {
+				} else if sideInfo.Scfsi[channel][2] == 1 && granule == 1 {
 					// Copy scalefactors from granule 0 to granule 1
 					for sfb := 11; sfb < 16; sfb++ {
-						mainData.ScalefacL[1][ch][sfb] = mainData.ScalefacL[0][ch][sfb]
+						mainData.ScalefacL[1][channel][sfb] = mainData.ScalefacL[0][channel][sfb]
 					}
 				}
 				// Scale factor bands 16-20
-				if sideInfo.Scfsi[ch][3] == 0 || gr == 0 {
+				if sideInfo.Scfsi[channel][3] == 0 || granule == 0 {
 					for sfb := 16; sfb < 21; sfb++ {
-						mainData.ScalefacL[gr][ch][sfb] = m.Bits(slen2)
+						mainData.ScalefacL[granule][channel][sfb] = bitStream.Bits(slen2)
 					}
-				} else if sideInfo.Scfsi[ch][3] == 1 && gr == 1 {
+				} else if sideInfo.Scfsi[channel][3] == 1 && granule == 1 {
 					// Copy scalefactors from granule 0 to granule 1
 					for sfb := 16; sfb < 21; sfb++ {
-						mainData.ScalefacL[1][ch][sfb] = mainData.ScalefacL[0][ch][sfb]
+						mainData.ScalefacL[1][channel][sfb] = mainData.ScalefacL[0][channel][sfb]
 					}
 				}
 			}
 			// Read Huffman coded data. Skip stuffing bits.
-			if err := readHuffman(m, header, sideInfo, mainData, part2Start, gr, ch); err != nil {
+			if err := readHuffman(bitStream, header, sideInfo, mainData, part2Start, granule, channel); err != nil {
 				return nil, nil, err
 			}
 		}
 	}
 	// The ancillary data is stored here,but we ignore it.
-	return mainData, m, nil
+	return mainData, bitStream, nil
 }
 
 func read(source FullReader, prev *bits.Bits, size, offset int) (*bits.Bits, error) {

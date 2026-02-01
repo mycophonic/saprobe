@@ -101,7 +101,7 @@ func (s *source) rewind() error {
 }
 
 func (s *source) Unread(buf []byte) {
-	s.buf = append(s.buf, buf...)
+	s.buf = append(buf, s.buf...)
 	s.pos -= int64(len(buf))
 }
 

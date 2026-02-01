@@ -18,9 +18,9 @@ import (
 	"errors"
 	"io"
 
-	"github.com/farcloser/saprobe/third-party/go-mp3/internal/consts"
-	"github.com/farcloser/saprobe/third-party/go-mp3/internal/frame"
-	"github.com/farcloser/saprobe/third-party/go-mp3/internal/frameheader"
+	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/consts"
+	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/frame"
+	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/frameheader"
 )
 
 // A Decoder is a MP3-decoded stream.
