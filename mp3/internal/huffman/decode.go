@@ -1,6 +1,8 @@
 package huffman
 
-import "github.com/mycophonic/saprobe/third-party/go-mp3/internal/bits"
+import (
+	"github.com/mycophonic/saprobe/mp3/internal/bits"
+)
 
 const (
 	nibbleMask    = 0xF // mask for extracting a 4-bit nibble

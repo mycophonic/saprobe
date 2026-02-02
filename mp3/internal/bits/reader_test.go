@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/bits"
+	"github.com/mycophonic/saprobe/mp3/internal/bits"
 )
 
 func TestReadBits_MatchesOriginal(t *testing.T) {
@@ -280,17 +280,6 @@ func TestBytes(t *testing.T) {
 	got := r.Bytes()
 	if len(got) != 2 || got[0] != 0xDE || got[1] != 0xAD {
 		t.Fatalf("Bytes() = %v, want [0xDE 0xAD]", got)
-	}
-}
-
-func TestTail(t *testing.T) {
-	t.Parallel()
-
-	r := bits.NewReader([]byte{0x01, 0x02, 0x03, 0x04})
-
-	got := r.Tail(2)
-	if len(got) != 2 || got[0] != 0x03 || got[1] != 0x04 {
-		t.Fatalf("Tail(2) = %v, want [0x03 0x04]", got)
 	}
 }
 

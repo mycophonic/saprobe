@@ -107,9 +107,8 @@ func init() {
 // For short blocks (blockType 2), three 12-point transforms are interleaved
 // into the 36-sample output with 6-sample overlap between blocks.
 func Win(input *[longHalfN]float32, blockType int, out *[longN]float32) {
-	*out = [longN]float32{}
-
 	if blockType == 2 {
+		*out = [longN]float32{}
 		iwd := &winData[2]
 
 		for blockIdx := range 3 {

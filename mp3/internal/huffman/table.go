@@ -207,7 +207,7 @@ func buildTableLevel(table *[]int16, codes []codeEntry, peekBits int) int {
 		secondaryBase := buildTableLevel(table, subCodes, nextPeek)
 
 		if secondaryBase > maxTableBase {
-			panic("huffman2: table offset exceeds int16 branch encoding capacity")
+			panic("huffman: table offset exceeds int16 branch encoding capacity")
 		}
 
 		// Branch entry: negative int16.

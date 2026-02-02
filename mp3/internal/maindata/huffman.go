@@ -3,14 +3,14 @@ package maindata
 import (
 	"fmt"
 
-	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/bits"
-	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/consts"
-	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/frameheader"
-	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/huffman"
-	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/sideinfo"
+	"github.com/mycophonic/saprobe/mp3/internal/bits"
+	"github.com/mycophonic/saprobe/mp3/internal/consts"
+	"github.com/mycophonic/saprobe/mp3/internal/frameheader"
+	"github.com/mycophonic/saprobe/mp3/internal/huffman"
+	"github.com/mycophonic/saprobe/mp3/internal/sideinfo"
 )
 
-//nolint:revive // magic numbers are MPEG spec constants (36=sfb boundary, 572=SamplesPerGr-4, 0.0=zero)
+//nolint:revive,varnamelen // magic numbers and short names are MPEG spec constants
 func readHuffman(
 	bitStream *bits.Reader,
 	header *frameheader.Header,
@@ -59,14 +59,11 @@ func readHuffman(
 	// Initialize bit cache for Huffman decoding (amortized across all decode calls).
 	bitCache := huffman.NewBitCache(bitStream)
 
-	// Read big_values using tables according to region_x_start
-	for isPos := 0; isPos < sideInfo.BigValues[granule][channel]*2; isPos++ {
-		// #22
-		if isPos >= len(mainData.Is[granule][channel]) {
-			//nolint:err113 // runtime value in error message required for debugging
-			return fmt.Errorf("mp3: isPos was too big: %d", isPos)
-		}
+	// Read big_values pairs: each Huffman word produces two frequency lines.
+	is := &mainData.Is[granule][channel]
+	bigValuesEnd := sideInfo.BigValues[granule][channel] * 2
 
+	for isPos := 0; isPos < bigValuesEnd; isPos += 2 {
 		var tableNum int
 
 		switch {
@@ -77,45 +74,23 @@ func readHuffman(
 		default:
 			tableNum = sideInfo.TableSelect[granule][channel][2]
 		}
-		// Get next Huffman coded words
-		x, freqLineY := huffman.DecodePair(&bitCache, tableNum)
-		// In the big_values area there are two freq lines per Huffman word
-		mainData.Is[granule][channel][isPos] = float32(x)
-		isPos++
-		mainData.Is[granule][channel][isPos] = float32(freqLineY)
+
+		freqLineX, freqLineY := huffman.DecodePair(&bitCache, tableNum)
+		is[isPos] = float32(freqLineX)
+		is[isPos+1] = float32(freqLineY)
 	}
-	// Read small values until isPos = 576 or we run out of huffman data
-	// TODO: Is this comment wrong?
+
+	// Read count1 quadruples: each Huffman word produces four frequency lines.
 	tableNum := sideInfo.Count1TableSelect[granule][channel] + 32
 
-	isPos := sideInfo.BigValues[granule][channel] * 2
-	for isPos <= 572 && bitCache.BitPos() <= bitPosEnd {
-		// Get next Huffman coded words
-		v, freqLineW, freqLineX, freqLineY := huffman.DecodeQuad(&bitCache, tableNum)
-
-		mainData.Is[granule][channel][isPos] = float32(v)
-
-		isPos++
-		if isPos >= consts.SamplesPerGr {
-			break
-		}
-
-		mainData.Is[granule][channel][isPos] = float32(freqLineW)
-
-		isPos++
-		if isPos >= consts.SamplesPerGr {
-			break
-		}
-
-		mainData.Is[granule][channel][isPos] = float32(freqLineX)
-
-		isPos++
-		if isPos >= consts.SamplesPerGr {
-			break
-		}
-
-		mainData.Is[granule][channel][isPos] = float32(freqLineY)
-		isPos++
+	isPos := bigValuesEnd
+	for isPos <= consts.SamplesPerGr-4 && bitCache.BitPos() <= bitPosEnd {
+		v, w, x, y := huffman.DecodeQuad(&bitCache, tableNum)
+		is[isPos] = float32(v)
+		is[isPos+1] = float32(w)
+		is[isPos+2] = float32(x)
+		is[isPos+3] = float32(y)
+		isPos += 4
 	}
 	// Check that we didn't read past the end of this section
 	if bitCache.BitPos() > (bitPosEnd + 1) {
@@ -130,10 +105,9 @@ func readHuffman(
 	// Setup count1 which is the index of the first sample in the rzero reg.
 	mainData.Count1[granule][channel] = isPos
 
-	// Zero out the last part if necessary
-	for isPos < consts.SamplesPerGr {
-		mainData.Is[granule][channel][isPos] = 0.0
-		isPos++
+	// Zero out the rzero region.
+	for i := isPos; i < consts.SamplesPerGr; i++ {
+		is[i] = 0.0
 	}
 	// Set the bitpos to point to the next part to read
 	bitStream.SetBitPos(bitPosEnd + 1)

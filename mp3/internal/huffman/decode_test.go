@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/bits"
+	"github.com/mycophonic/saprobe/mp3/internal/bits"
 )
 
 // codeToBytes builds a byte slice containing a Huffman codeword followed by padding.

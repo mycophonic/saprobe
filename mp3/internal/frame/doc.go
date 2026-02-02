@@ -1,4 +1,4 @@
-// Package frame2 decodes MPEG Audio Layer 3 frames into raw PCM audio.
+// Package frame decodes MPEG Audio Layer 3 frames into raw PCM audio.
 //
 // It implements the complete MP3 decode pipeline: requantization, reorder,
 // stereo processing, antialias, hybrid synthesis (IMDCT), frequency inversion,

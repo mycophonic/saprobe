@@ -8,11 +8,12 @@ import (
 	"io"
 
 	"github.com/mycophonic/saprobe"
-	gomp3 "github.com/mycophonic/saprobe/third-party/go-mp3"
+	"github.com/mycophonic/saprobe/mp3/internal/consts"
+	"github.com/mycophonic/saprobe/mp3/internal/frame"
 )
 
 const (
-	channels       = 2 // go-mp3 always decodes to stereo
+	channels       = 2 // always decodes to stereo
 	bytesPerSample = 2 // 16-bit
 	bytesPerFrame  = channels * bytesPerSample
 
@@ -23,9 +24,7 @@ const (
 	samplesPerFrameMPEG1 = samplesPerGranule * 2 // 1152
 	samplesPerFrameMPEG2 = samplesPerGranule * 1 // 576
 
-	// go-mp3 decoder has additional delay from synthesis filterbank priming.
-	// This is the difference between go-mp3's output and what LAME header expects.
-	// Empirically measured: 529 samples.
+	// Decoder delay from synthesis filterbank priming (empirically measured).
 	decoderDelay = 529
 )
 
@@ -83,6 +82,24 @@ const (
 	printableASCIIMax = 0x7E
 )
 
+// source is a minimal position-tracking wrapper around io.ReadSeeker.
+// It implements consts.FullReader so internal packages can track the stream position.
+type source struct {
+	reader io.ReadSeeker
+	pos    int64
+}
+
+func (s *source) ReadFull(buf []byte) (int, error) {
+	read, err := io.ReadFull(s.reader, buf)
+	s.pos += int64(read)
+
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		err = io.EOF
+	}
+
+	return read, err
+}
+
 // gaplessInfo contains encoder delay and padding from LAME header.
 type gaplessInfo struct {
 	delay           int  // samples to skip at start (LAME encoder delay)
@@ -95,58 +112,137 @@ type gaplessInfo struct {
 // The output is always stereo (2 channels) at the source sample rate.
 // If the file contains LAME gapless metadata, encoder delay and padding are trimmed automatically.
 func Decode(reader io.ReadSeeker) ([]byte, saprobe.PCMFormat, error) {
-	// Parse gapless info before decoding.
 	gapless := parseGaplessInfo(reader)
 
-	// Seek back to start for decoding.
 	if _, err := reader.Seek(0, io.SeekStart); err != nil {
 		return nil, saprobe.PCMFormat{}, fmt.Errorf("seeking to start: %w", err)
 	}
 
-	decoder, err := gomp3.NewDecoder(reader)
+	// Get file size for output buffer pre-allocation.
+	fileSize, _ := reader.Seek(0, io.SeekEnd)
+
+	if _, err := reader.Seek(0, io.SeekStart); err != nil {
+		return nil, saprobe.PCMFormat{}, fmt.Errorf("seeking to start: %w", err)
+	}
+
+	// Skip ID3v1/ID3v2 tags to reach the first audio frame.
+	if err := skipTags(reader); err != nil {
+		return nil, saprobe.PCMFormat{}, fmt.Errorf("skipping tags: %w", err)
+	}
+
+	pos, err := reader.Seek(0, io.SeekCurrent)
 	if err != nil {
-		return nil, saprobe.PCMFormat{}, fmt.Errorf("creating mp3 decoder: %w", err)
+		return nil, saprobe.PCMFormat{}, fmt.Errorf("getting position: %w", err)
+	}
+
+	src := &source{reader: reader, pos: pos}
+
+	mpFrame := frame.NewFrame()
+
+	// Read first frame to determine sample rate.
+	if _, err := mpFrame.Read(src, src.pos); err != nil {
+		return nil, saprobe.PCMFormat{}, fmt.Errorf("reading first mp3 frame: %w", err)
 	}
 
 	format := saprobe.PCMFormat{
-		SampleRate: decoder.SampleRate(),
+		SampleRate: mpFrame.SampleRateHz(),
 		BitDepth:   saprobe.Depth16,
 		Channels:   channels,
 	}
 
-	// Pre-allocate output buffer when total length is known.
+	// Pre-allocate output buffer from file size and first frame's compression ratio.
 	var buf []byte
-	if length := decoder.Length(); length > 0 {
-		buf = make([]byte, 0, length)
+
+	if compressedSize := mpFrame.Header().FrameSize(); fileSize > 0 && compressedSize > 0 {
+		ratio := float64(mpFrame.BytesPerFrame()) / float64(compressedSize)
+		buf = make([]byte, 0, int(float64(fileSize)*ratio))
 	}
 
-	chunk := make([]byte, 32*1024)
+	// Decode first frame.
+	decodeBuf := make([]byte, mpFrame.BytesPerFrame())
+	mpFrame.Decode(decodeBuf)
+	buf = append(buf, decodeBuf...)
 
+	// Decode remaining frames.
 	for {
-		readN, readErr := decoder.Read(chunk)
-		if readN > 0 {
-			buf = append(buf, chunk[:readN]...)
-		}
+		if _, readErr := mpFrame.Read(src, src.pos); readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
 
-		if errors.Is(readErr, io.EOF) {
-			break
-		}
+			var unexpectedEOF *consts.UnexpectedEOF
+			if errors.As(readErr, &unexpectedEOF) {
+				break
+			}
 
-		if readErr != nil {
 			return nil, saprobe.PCMFormat{}, fmt.Errorf("decoding mp3: %w", readErr)
 		}
+
+		needed := mpFrame.BytesPerFrame()
+		if cap(decodeBuf) < needed {
+			decodeBuf = make([]byte, needed)
+		}
+
+		decodeBuf = decodeBuf[:needed]
+		mpFrame.Decode(decodeBuf)
+		buf = append(buf, decodeBuf...)
 	}
 
-	// Apply gapless trimming if we have valid info.
 	buf = applyGaplessTrimming(buf, gapless)
 
 	return buf, format, nil
 }
 
+// skipTags skips past ID3v1 ("TAG") and ID3v2 ("ID3") headers at the start of the stream.
+func skipTags(reader io.ReadSeeker) error {
+	var buf [3]byte
+	if _, err := io.ReadFull(reader, buf[:]); err != nil {
+		// Can't read 3 bytes — seek to start and let the frame decoder handle it.
+		_, _ = reader.Seek(0, io.SeekStart)
+
+		return nil //nolint:nilerr // truncated stream is not fatal; frame decoder will report it
+	}
+
+	switch string(buf[:]) {
+	case "TAG":
+		// ID3v1 tag at start (non-standard). Skip remaining 125 bytes.
+		//revive:disable-next-line:add-constant
+		if _, err := reader.Seek(125, io.SeekCurrent); err != nil {
+			return fmt.Errorf("skipping ID3v1: %w", err)
+		}
+
+	case "ID3":
+		// ID3v2: skip version (2 bytes) + flags (1 byte).
+		if _, err := reader.Seek(3, io.SeekCurrent); err != nil {
+			return fmt.Errorf("skipping ID3v2 header: %w", err)
+		}
+
+		// Read syncsafe size (4 bytes, 7 bits each).
+		var sizeBuf [4]byte
+		if _, err := io.ReadFull(reader, sizeBuf[:]); err != nil {
+			return nil //nolint:nilerr // truncated ID3v2 is not fatal
+		}
+
+		//revive:disable-next-line:add-constant
+		size := (int64(sizeBuf[0]) << 21) | (int64(sizeBuf[1]) << 14) |
+			(int64(sizeBuf[2]) << 7) | int64(sizeBuf[3])
+
+		if _, err := reader.Seek(size, io.SeekCurrent); err != nil {
+			return fmt.Errorf("skipping ID3v2 body: %w", err)
+		}
+
+	default:
+		// Not a tag — seek back 3 bytes.
+		if _, err := reader.Seek(-3, io.SeekCurrent); err != nil {
+			return fmt.Errorf("seeking back after tag probe: %w", err)
+		}
+	}
+
+	return nil
+}
+
 // applyGaplessTrimming removes encoder delay from start and padding from end.
-// For go-mp3 decoder, we need to account for:
-// 1. XING/Info frame being decoded as audio (1152 MPEG1 / 576 MPEG2 samples) if present
-// 2. go-mp3's synthesis filterbank priming delay (529 samples).
+// Accounts for: XING/Info frame decoded as audio, and synthesis filterbank priming delay.
 func applyGaplessTrimming(buf []byte, info gaplessInfo) []byte {
 	if info.delay == 0 && info.padding == 0 && !info.hasXINGTag {
 		return buf
@@ -218,7 +314,7 @@ func parseGaplessInfo(reader io.ReadSeeker) gaplessInfo {
 		return gaplessInfo{}
 	}
 
-	// XING/Info frame found - go-mp3 will decode this as audio.
+	// XING/Info frame found — the decoder will decode this as audio.
 	hasXING := true
 	spf := frameSamplesPerFrame(frameHeader)
 
@@ -226,7 +322,7 @@ func parseGaplessInfo(reader io.ReadSeeker) gaplessInfo {
 	// XING structure: "Xing" (4) + flags (4) + optional fields based on flags.
 	lameOffset := findLAMETag(xingData)
 	if lameOffset < 0 || lameOffset+lameTagMinSize > len(xingData) {
-		// XING present but no LAME tag - still need to skip the XING frame.
+		// XING present but no LAME tag — still need to skip the XING frame.
 		return gaplessInfo{hasXINGTag: hasXING, samplesPerFrame: spf}
 	}
 
@@ -260,8 +356,10 @@ func skipID3v2(reader io.ReadSeeker) int {
 	bytesRead, err := reader.Read(header)
 
 	if err != nil || bytesRead < id3v2HeaderSize {
-		// No ID3v2 tag or read error - seek back and continue.
-		_, _ = reader.Seek(0, io.SeekStart)
+		// No ID3v2 tag or read error — seek back and continue.
+		if _, seekErr := reader.Seek(0, io.SeekStart); seekErr != nil {
+			return -1
+		}
 
 		return 0
 	}
@@ -269,8 +367,10 @@ func skipID3v2(reader io.ReadSeeker) int {
 	// Check for "ID3" signature.
 	//nolint:gosec // G602: bounds guaranteed by bytesRead < 10 guard above.
 	if header[0] != 'I' || header[1] != 'D' || header[2] != '3' {
-		// No ID3v2 tag - seek back to start.
-		_, _ = reader.Seek(0, io.SeekStart)
+		// No ID3v2 tag — seek back to start.
+		if _, seekErr := reader.Seek(0, io.SeekStart); seekErr != nil {
+			return -1
+		}
 
 		return 0
 	}
@@ -430,8 +530,8 @@ func findLAMETag(xingData []byte) int {
 
 // frameSamplesPerFrame returns the number of decoded samples per frame
 // based on the MPEG version in the frame header.
-// MPEG1 Layer III: 2 granules × 576 = 1152 samples.
-// MPEG2/2.5 Layer III: 1 granule × 576 = 576 samples.
+// MPEG1 Layer III: 2 granules x 576 = 1152 samples.
+// MPEG2/2.5 Layer III: 1 granule x 576 = 576 samples.
 func frameSamplesPerFrame(header []byte) int {
 	versionBits := (header[1] >> 3) & 0x03
 	if versionBits == mpegVersion1 {

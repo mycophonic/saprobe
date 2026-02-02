@@ -1,4 +1,4 @@
-# go-mp3 Fork: Known Issues
+# Known Issues
 
 Diagnosed from real-world MP3 decoding failures.
 

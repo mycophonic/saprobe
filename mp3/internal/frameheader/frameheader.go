@@ -6,20 +6,20 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/consts"
+	"github.com/mycophonic/saprobe/mp3/internal/consts"
 )
 
 // Sentinel errors returned by Parse.
 var (
-	ErrInvalidSync      = errors.New("frameheader2: invalid sync word")
-	ErrReservedVersion  = errors.New("frameheader2: reserved MPEG version")
-	ErrUnsupportedMPEG2 = errors.New("frameheader2: MPEG 2.5 not supported")
-	ErrReservedLayer    = errors.New("frameheader2: reserved layer")
-	ErrUnsupportedLayer = errors.New("frameheader2: only Layer III supported")
-	ErrInvalidBitrate   = errors.New("frameheader2: invalid bitrate index")
-	ErrFreeBitrate      = errors.New("frameheader2: free bitrate not supported")
-	ErrReservedSfreq    = errors.New("frameheader2: reserved sampling frequency")
-	ErrInvalidEmphasis  = errors.New("frameheader2: invalid emphasis value")
+	ErrInvalidSync      = errors.New("frameheader: invalid sync word")
+	ErrReservedVersion  = errors.New("frameheader: reserved MPEG version")
+	ErrUnsupportedMPEG2 = errors.New("frameheader: MPEG 2.5 not supported")
+	ErrReservedLayer    = errors.New("frameheader: reserved layer")
+	ErrUnsupportedLayer = errors.New("frameheader: only Layer III supported")
+	ErrInvalidBitrate   = errors.New("frameheader: invalid bitrate index")
+	ErrFreeBitrate      = errors.New("frameheader: free bitrate not supported")
+	ErrReservedSfreq    = errors.New("frameheader: reserved sampling frequency")
+	ErrInvalidEmphasis  = errors.New("frameheader: invalid emphasis value")
 )
 
 // Bit field extraction constants.
@@ -313,7 +313,7 @@ func Read(source consts.FullReader, position int64) (Header, int64, error) {
 			return Header{}, 0, &consts.UnexpectedEOF{At: "readHeader (1)"}
 		}
 
-		return Header{}, 0, fmt.Errorf("frameheader2: initial read: %w", err)
+		return Header{}, 0, fmt.Errorf("frameheader: initial read: %w", err)
 	}
 
 	raw := binary.BigEndian.Uint32(buf[:])
@@ -332,7 +332,7 @@ func Read(source consts.FullReader, position int64) (Header, int64, error) {
 				return Header{}, 0, &consts.UnexpectedEOF{At: "readHeader (2)"}
 			}
 
-			return Header{}, 0, fmt.Errorf("frameheader2: sync scan read: %w", err)
+			return Header{}, 0, fmt.Errorf("frameheader: sync scan read: %w", err)
 		}
 
 		position++

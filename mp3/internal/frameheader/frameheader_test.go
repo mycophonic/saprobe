@@ -7,8 +7,8 @@ import (
 	"io"
 	"testing"
 
-	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/consts"
-	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/frameheader"
+	"github.com/mycophonic/saprobe/mp3/internal/consts"
+	"github.com/mycophonic/saprobe/mp3/internal/frameheader"
 )
 
 // headerFields holds the fields needed to build a raw MPEG frame header.

@@ -7,11 +7,12 @@ import (
 	"math"
 
 	"github.com/mycophonic/primordium/simd"
-	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/consts"
-	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/frameheader"
-	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/imdct"
-	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/maindata"
-	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/sideinfo"
+
+	"github.com/mycophonic/saprobe/mp3/internal/consts"
+	"github.com/mycophonic/saprobe/mp3/internal/frameheader"
+	"github.com/mycophonic/saprobe/mp3/internal/imdct"
+	"github.com/mycophonic/saprobe/mp3/internal/maindata"
+	"github.com/mycophonic/saprobe/mp3/internal/sideinfo"
 )
 
 // Frame is a persistent MP3 frame decoder. Allocate once with [NewFrame] and
@@ -47,7 +48,7 @@ func NewFrame() *Frame {
 func (f *Frame) Read(source consts.FullReader, position int64) (int64, error) {
 	header, pos, err := frameheader.Read(source, position)
 	if err != nil {
-		return 0, fmt.Errorf("mp3: frame2.Read header: %w", err)
+		return 0, fmt.Errorf("mp3: frame.Read header: %w", err)
 	}
 
 	if header.Protected() {
@@ -55,21 +56,21 @@ func (f *Frame) Read(source consts.FullReader, position int64) (int64, error) {
 
 		if n, err := source.ReadFull(crc[:]); n < 2 {
 			if errors.Is(err, io.EOF) {
-				return 0, &consts.UnexpectedEOF{At: "frame2.Read: CRC"}
+				return 0, &consts.UnexpectedEOF{At: "frame.Read: CRC"}
 			}
 
-			return 0, fmt.Errorf("mp3: frame2.Read CRC: %w", err)
+			return 0, fmt.Errorf("mp3: frame.Read CRC: %w", err)
 		}
 	}
 
 	f.header = &header
 
 	if err := sideinfo.Read(source, f.header, &f.sideInfo); err != nil {
-		return 0, fmt.Errorf("mp3: frame2.Read sideinfo: %w", err)
+		return 0, fmt.Errorf("mp3: frame.Read sideinfo: %w", err)
 	}
 
 	if err := maindata.Read(source, f.header, &f.sideInfo, &f.mainData, &f.reservoir); err != nil {
-		return 0, fmt.Errorf("mp3: frame2.Read maindata: %w", err)
+		return 0, fmt.Errorf("mp3: frame.Read maindata: %w", err)
 	}
 
 	return pos, nil
@@ -451,14 +452,12 @@ func (f *Frame) frequencyInversion(gr, ch int) {
 // subbandSynthesis performs the 32-subband polyphase synthesis filterbank,
 // producing 576 PCM samples (18 iterations × 32 samples) for one granule/channel.
 //
-//nolint:revive,varnamelen,gosec // MPEG spec constants, short names, and bounded slice access
+//nolint:revive,varnamelen // MPEG spec constants and short names
 func (f *Frame) subbandSynthesis(gr, ch int, out []byte) {
-	var (
-		uVec [512]float32
-		sVec [32]float32
-	)
+	var sVec [32]float32
 
 	nch := f.header.Channels()
+	vv := &f.vVec[ch]
 
 	for ss := range 18 {
 		// Advance the circular buffer write position.
@@ -476,26 +475,19 @@ func (f *Frame) subbandSynthesis(gr, ch int, out []byte) {
 		// reads spanning the logical wrap boundary are contiguous.
 		var vOut [64]float32
 		simd.MatVecMul64x32(&vOut, &synthNWin, &sVec)
-		copy(f.vVec[ch][off:off+64], vOut[:])
-		copy(f.vVec[ch][off+1024:off+1024+64], vOut[:])
+		copy(vv[off:off+64], vOut[:])
+		copy(vv[off+1024:off+1024+64], vOut[:])
 
-		// Build the U vector from the circular buffer.
-		for i := 0; i < 512; i += 64 {
-			j := off + (i << 1)
-			copy(uVec[i:i+32], f.vVec[ch][j:j+32])
-			copy(uVec[i+32:i+64], f.vVec[ch][j+96:j+128])
-		}
-
-		// Window by D coefficients.
-		for i := range 512 {
-			uVec[i] *= synthDtbl[i]
-		}
-
-		// Sum and output 32 PCM samples.
+		// Fused D-window + sum: accumulate 32 PCM samples directly from
+		// the circular buffer, avoiding the intermediate 512-element U vector.
+		// Each sample sums 16 terms: 8 groups × 2 halves (first 32 + skip 64 + next 32).
 		for sampleIdx := range 32 {
 			var sum float32
-			for j := 0; j < 512; j += 32 {
-				sum += uVec[j+sampleIdx]
+
+			for k := range 8 {
+				j := off + 128*k
+				sum += vv[j+sampleIdx] * synthDtbl[k*64+sampleIdx]
+				sum += vv[j+96+sampleIdx] * synthDtbl[k*64+32+sampleIdx]
 			}
 
 			samp := int(sum * 32767)

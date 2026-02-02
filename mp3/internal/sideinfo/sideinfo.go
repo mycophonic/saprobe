@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/consts"
-	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/frameheader"
+	"github.com/mycophonic/saprobe/mp3/internal/consts"
+	"github.com/mycophonic/saprobe/mp3/internal/frameheader"
 )
 
 // A SideInfo is MPEG1 Layer 3 Side Information.
@@ -73,7 +73,7 @@ var sideInfoBitsToRead = [2][4]int{ //nolint:gochecknoglobals // immutable looku
 // The caller provides dst (typically embedded in Frame as a value field).
 // dst is fully overwritten for active granules/channels.
 //
-//nolint:revive // cognitive complexity mirrors the spec's branching structure
+//revive:disable:cognitive-complexity
 func Read(source consts.FullReader, header *frameheader.Header, dst *SideInfo) error {
 	nch := header.Channels()
 
@@ -85,7 +85,7 @@ func Read(source consts.FullReader, header *frameheader.Header, dst *SideInfo) e
 	n, err := source.ReadFull(reader.buf[:sideInfoSize])
 	if n < sideInfoSize {
 		if errors.Is(err, io.EOF) {
-			return &consts.UnexpectedEOF{At: "sideinfo2.Read"}
+			return &consts.UnexpectedEOF{At: "sideinfo.Read"}
 		}
 
 		return fmt.Errorf("mp3: couldn't read sideinfo %d bytes: %w", sideInfoSize, err)
@@ -116,7 +116,8 @@ func Read(source consts.FullReader, header *frameheader.Header, dst *SideInfo) e
 	// Get the rest of the side information
 	for granule := range header.Granules() {
 		for channel := range nch {
-			dst.Part2And3Length[granule][channel] = reader.readBits(12) //nolint:revive // MPEG spec bit width
+			//revive:disable:add-constant
+			dst.Part2And3Length[granule][channel] = reader.readBits(12)
 			dst.BigValues[granule][channel] = reader.readBits(9)
 			dst.GlobalGain[granule][channel] = reader.readBits(8)
 			//nolint:gosec // bitsToRead is [4]int, index 3 always valid
@@ -135,14 +136,15 @@ func Read(source consts.FullReader, header *frameheader.Header, dst *SideInfo) e
 					dst.SubblockGain[granule][channel][window] = reader.readBits(3)
 				}
 
-				// TODO: This is not listed on the spec. Is this correct??
+				// Implicit region counts for short/mixed blocks (not transmitted in bitstream).
+				// Pure short blocks (type 2, no mixed): region0 spans 8 scale factor bands.
+				// Mixed blocks or other switched types: region0 spans 7 scale factor bands.
 				if dst.BlockType[granule][channel] == 2 && dst.MixedBlockFlag[granule][channel] == 0 {
-					dst.Region0Count[granule][channel] = 8 // Implicit
+					dst.Region0Count[granule][channel] = 8
 				} else {
-					dst.Region0Count[granule][channel] = 7 // Implicit
+					dst.Region0Count[granule][channel] = 7
 				}
-				// The standard is wrong on this!!!
-				// Implicit
+				// Region1 fills the remaining bands up to 20 (total = region0 + region1).
 				dst.Region1Count[granule][channel] = 20 - dst.Region0Count[granule][channel]
 			} else {
 				for region := range 3 {

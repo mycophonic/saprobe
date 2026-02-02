@@ -1,4 +1,4 @@
-// Package huffman2 provides high-performance Huffman decoding for MPEG audio
+// Package huffman provides high-performance Huffman decoding for MPEG audio
 // (ISO 11172-3 / 13818-3) spectral data.
 //
 // It replaces the previous bit-at-a-time tree walker with multi-level flat

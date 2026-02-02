@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/bits"
-	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/consts"
-	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/frameheader"
-	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/sideinfo"
+	"github.com/mycophonic/saprobe/mp3/internal/bits"
+	"github.com/mycophonic/saprobe/mp3/internal/consts"
+	"github.com/mycophonic/saprobe/mp3/internal/frameheader"
+	"github.com/mycophonic/saprobe/mp3/internal/sideinfo"
 )
 
 // MainData contains the decoded MPEG Layer 3 main data including scale factors and frequency lines.
@@ -135,29 +135,38 @@ func Read(
 		// Insufficient reservoir — append current data and proceed.
 		// The bitstream position won't align with MainDataBegin, but we replicate
 		// the original behavior for compatibility.
-		// TODO: Define a special error and enable skipping to the next frame.
+		if res.len+mainDataSize > len(res.buf) {
+			//nolint:err113 // runtime value in error message required for debugging
+			return fmt.Errorf("mp3: maindata reservoir overflow: %d + %d > %d", res.len, mainDataSize, len(res.buf))
+		}
+
 		count, err := source.ReadFull(res.buf[res.len : res.len+mainDataSize])
 		if count < mainDataSize {
 			if errors.Is(err, io.EOF) {
-				return &consts.UnexpectedEOF{At: "maindata2.Read (1)"}
+				return &consts.UnexpectedEOF{At: "maindata.Read (1)"}
 			}
 
-			return fmt.Errorf("mp3: maindata2.Read (1): %w", err)
+			return fmt.Errorf("mp3: maindata.Read (1): %w", err)
 		}
 
 		res.len += mainDataSize
 	} else {
 		// Normal path: shift reservoir tail to start of buffer, then read current data.
+		if offset+mainDataSize > len(res.buf) {
+			//nolint:err113 // runtime value in error message required for debugging
+			return fmt.Errorf("mp3: maindata reservoir overflow: %d + %d > %d", offset, mainDataSize, len(res.buf))
+		}
+
 		tailStart := res.len - offset
 		copy(res.buf[:offset], res.buf[tailStart:res.len])
 
 		count, err := source.ReadFull(res.buf[offset : offset+mainDataSize])
 		if count < mainDataSize {
 			if errors.Is(err, io.EOF) {
-				return &consts.UnexpectedEOF{At: "maindata2.Read (2)"}
+				return &consts.UnexpectedEOF{At: "maindata.Read (2)"}
 			}
 
-			return fmt.Errorf("mp3: maindata2.Read (2): %w", err)
+			return fmt.Errorf("mp3: maindata.Read (2): %w", err)
 		}
 
 		res.len = offset + mainDataSize
@@ -226,8 +235,7 @@ func getScaleFactorsMpeg1(
 						dst.ScalefacL[granule][channel][sfb] = bitStream.ReadBits(slen1)
 					}
 				} else if sideInfo.Scfsi[channel][0] == 1 && granule == 1 {
-					// Copy scalefactors from granule 0 to granule 1
-					// TODO: This is not listed on the spec.
+					// Copy scalefactors from granule 0 to granule 1 (scfsi reuse, ISO 11172-3 §2.4.2.7).
 					for sfb := range 6 {
 						dst.ScalefacL[1][channel][sfb] = dst.ScalefacL[0][channel][sfb]
 					}

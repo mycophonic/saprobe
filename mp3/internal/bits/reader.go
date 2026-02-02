@@ -4,10 +4,10 @@ import "errors"
 
 var (
 	// ErrOverflow is returned by [Reader.Err] when ReadBits is called with n > 32.
-	ErrOverflow = errors.New("bit2: read width exceeds 32 bits")
+	ErrOverflow = errors.New("bits: read width exceeds 32 bits")
 
 	// ErrUnderflow is returned by [Reader.Err] when a read extends past the end of data.
-	ErrUnderflow = errors.New("bit2: read past end of data")
+	ErrUnderflow = errors.New("bits: read past end of data")
 )
 
 // Reader reads bits MSB-first from a byte slice.
@@ -124,12 +124,6 @@ func (r *Reader) Len() int {
 // Bytes returns the underlying byte slice. The caller must not modify it.
 func (r *Reader) Bytes() []byte {
 	return r.data
-}
-
-// Tail returns the last count bytes of the underlying data.
-// Panics if count > Len().
-func (r *Reader) Tail(count int) []byte {
-	return r.data[len(r.data)-count:]
 }
 
 // PeekBits reads count bits without advancing the position or affecting error state.
