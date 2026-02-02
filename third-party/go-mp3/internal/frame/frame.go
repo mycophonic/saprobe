@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 
+	"github.com/mycophonic/primordium/simd"
 	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/consts"
 	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/frameheader"
 	"github.com/mycophonic/saprobe/third-party/go-mp3/internal/imdct"
@@ -470,20 +471,13 @@ func (f *Frame) subbandSynthesis(gr, ch int, out []byte) {
 			sVec[i] = d[i*18+ss]
 		}
 
-		// Matrix multiply with the synthesis cosine window.
+		// Matrix multiply with the synthesis cosine window (SIMD-accelerated).
 		// Write each result to both halves of the doubled buffer so that
 		// reads spanning the logical wrap boundary are contiguous.
-		for i := range 64 {
-			var sum float32
-
-			row := &synthNWin[i]
-			for j := range 32 {
-				sum += row[j] * sVec[j]
-			}
-
-			f.vVec[ch][off+i] = sum
-			f.vVec[ch][off+i+1024] = sum
-		}
+		var vOut [64]float32
+		simd.MatVecMul64x32(&vOut, &synthNWin, &sVec)
+		copy(f.vVec[ch][off:off+64], vOut[:])
+		copy(f.vVec[ch][off+1024:off+1024+64], vOut[:])
 
 		// Build the U vector from the circular buffer.
 		for i := 0; i < 512; i += 64 {
