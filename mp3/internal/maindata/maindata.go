@@ -30,6 +30,12 @@ type Reservoir struct {
 	len int
 }
 
+// Reset clears the reservoir, discarding all buffered main data.
+// Called after a sync skip to prevent decoding from stale bytes.
+func (r *Reservoir) Reset() {
+	r.len = 0
+}
+
 var scalefacSizesMpeg1 = [16][2]int{ //nolint:gochecknoglobals // immutable lookup table
 	{0, 0},
 	{0, 1},

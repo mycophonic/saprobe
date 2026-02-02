@@ -118,7 +118,7 @@ func Read(source consts.FullReader, header *frameheader.Header, dst *SideInfo) e
 		for channel := range nch {
 			//revive:disable:add-constant
 			dst.Part2And3Length[granule][channel] = reader.readBits(12)
-			dst.BigValues[granule][channel] = reader.readBits(9)
+			dst.BigValues[granule][channel] = min(reader.readBits(9), 288)
 			dst.GlobalGain[granule][channel] = reader.readBits(8)
 			//nolint:gosec // bitsToRead is [4]int, index 3 always valid
 			dst.ScalefacCompress[granule][channel] = reader.readBits(bitsToRead[3])

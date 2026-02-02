@@ -248,28 +248,39 @@ func (d *Decoder) decodeNextFrame() error {
 }
 
 // readFrame reads and decodes a single MP3 frame, returning raw PCM bytes.
+// Frames with insufficient reservoir data are skipped (the frame's main data
+// is consumed into the reservoir for subsequent frames, but no PCM is emitted).
 func (d *Decoder) readFrame() ([]byte, error) {
-	if d.firstRead {
-		d.firstRead = false
-	} else {
-		if _, readErr := d.mpFrame.Read(d.src, d.src.pos); readErr != nil {
-			if errors.Is(readErr, io.EOF) {
-				return nil, io.EOF
-			}
+	for {
+		if d.firstRead {
+			d.firstRead = false
+		} else {
+			if _, readErr := d.mpFrame.Read(d.src, d.src.pos); readErr != nil {
+				if errors.Is(readErr, io.EOF) {
+					return nil, io.EOF
+				}
 
-			var unexpectedEOF *consts.UnexpectedEOF
-			if errors.As(readErr, &unexpectedEOF) {
-				return nil, io.EOF
-			}
+				var unexpectedEOF *consts.UnexpectedEOF
+				if errors.As(readErr, &unexpectedEOF) {
+					return nil, io.EOF
+				}
 
-			return nil, fmt.Errorf("decoding mp3: %w", readErr)
+				return nil, fmt.Errorf("decoding mp3: %w", readErr)
+			}
 		}
+
+		if d.mpFrame.SkipDecode() {
+			// Reservoir was insufficient — frame data has been consumed into
+			// the reservoir for future frames. Skip this frame so it doesn't
+			// create an alignment offset in the output.
+			continue
+		}
+
+		buf := make([]byte, d.mpFrame.BytesPerFrame())
+		d.mpFrame.Decode(buf)
+
+		return buf, nil
 	}
-
-	buf := make([]byte, d.mpFrame.BytesPerFrame())
-	d.mpFrame.Decode(buf)
-
-	return buf, nil
 }
 
 // applyEndTrim feeds decoded PCM through the end-trim hold buffer and

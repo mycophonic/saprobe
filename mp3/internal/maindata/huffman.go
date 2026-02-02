@@ -24,6 +24,8 @@ func readHuffman(
 			mainData.Is[granule][channel][i] = 0.0
 		}
 
+		mainData.Count1[granule][channel] = 0
+
 		return nil
 	}
 

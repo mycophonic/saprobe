@@ -52,6 +52,17 @@ func (f *Frame) Read(source consts.FullReader, position int64) (int64, error) {
 		return 0, fmt.Errorf("mp3: frame.Read header: %w", err)
 	}
 
+	// Detect sync skip: if the header was found beyond the expected position,
+	// bytes were skipped due to corrupt data. Reset the reservoir to prevent
+	// decoding from stale bytes, and clear the IMDCT overlap-add store to
+	// prevent corrupted state from propagating to subsequent frames.
+	if pos > position {
+		f.reservoir.Reset()
+		f.store = [2][32][18]float32{} //nolint:revive // zero-value reset matching field type
+		f.vVec = [2][2048]float32{}    //nolint:revive // zero-value reset matching field type
+		f.vOff = [2]int{}
+	}
+
 	if header.Protected() {
 		var crc [2]byte
 
@@ -85,6 +96,11 @@ func (f *Frame) SampleRateHz() int { return f.header.SampleRateHz() }
 
 // BytesPerFrame returns the number of decoded PCM bytes this frame produces.
 func (f *Frame) BytesPerFrame() int { return f.header.BytesPerFrame() }
+
+// SkipDecode reports whether the last Read could not be decoded because the
+// bit reservoir had insufficient data. The caller should skip this frame's
+// output (or output silence) and continue to the next frame.
+func (f *Frame) SkipDecode() bool { return f.skipDecode }
 
 // Header returns the parsed frame header.
 func (f *Frame) Header() *frameheader.Header { return f.header }
