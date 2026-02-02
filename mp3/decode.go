@@ -108,89 +108,216 @@ type gaplessInfo struct {
 	samplesPerFrame int  // decoded samples per frame: 1152 for MPEG1, 576 for MPEG2/2.5
 }
 
-// Decode reads an MP3 stream and decodes it to interleaved little-endian signed 16-bit PCM bytes.
-// The output is always stereo (2 channels) at the source sample rate.
-// If the file contains LAME gapless metadata, encoder delay and padding are trimmed automatically.
-func Decode(reader io.ReadSeeker) ([]byte, saprobe.PCMFormat, error) {
-	gapless := parseGaplessInfo(reader)
+// Decoder streams decoded PCM from an MP3 source.
+// Output is always stereo 16-bit little-endian at the source sample rate.
+// LAME gapless metadata is applied automatically (start trim + end trim).
+type Decoder struct {
+	src     *source
+	mpFrame *frame.Frame
+	format  saprobe.PCMFormat
 
-	if _, err := reader.Seek(0, io.SeekStart); err != nil {
-		return nil, saprobe.PCMFormat{}, fmt.Errorf("seeking to start: %w", err)
+	// Gapless trimming state.
+	startTrimRemaining int // decoded bytes still to discard at start
+	endTrimBytes       int // bytes to hold back for end trim
+
+	// Per-frame decoded PCM buffer, drained by Read.
+	buf    []byte
+	bufOff int
+
+	// Hold buffer: retains the last endTrimBytes of decoded output.
+	// On EOF these bytes are discarded (they are encoder padding).
+	holdBuf []byte
+
+	eof       bool
+	firstRead bool // true until first frame is decoded
+}
+
+// NewDecoder opens an MP3 stream and returns a streaming decoder.
+// The first frame is read immediately to determine the output format.
+func NewDecoder(rs io.ReadSeeker) (*Decoder, error) { //nolint:varnamelen // rs is idiomatic for io.ReadSeeker
+	gapless := parseGaplessInfo(rs)
+
+	if _, err := rs.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("seeking to start: %w", err)
 	}
 
-	// Get file size for output buffer pre-allocation.
-	fileSize, _ := reader.Seek(0, io.SeekEnd)
-
-	if _, err := reader.Seek(0, io.SeekStart); err != nil {
-		return nil, saprobe.PCMFormat{}, fmt.Errorf("seeking to start: %w", err)
+	if err := skipTags(rs); err != nil {
+		return nil, fmt.Errorf("skipping tags: %w", err)
 	}
 
-	// Skip ID3v1/ID3v2 tags to reach the first audio frame.
-	if err := skipTags(reader); err != nil {
-		return nil, saprobe.PCMFormat{}, fmt.Errorf("skipping tags: %w", err)
-	}
-
-	pos, err := reader.Seek(0, io.SeekCurrent)
+	pos, err := rs.Seek(0, io.SeekCurrent)
 	if err != nil {
-		return nil, saprobe.PCMFormat{}, fmt.Errorf("getting position: %w", err)
+		return nil, fmt.Errorf("getting position: %w", err)
 	}
 
-	src := &source{reader: reader, pos: pos}
-
+	src := &source{reader: rs, pos: pos}
 	mpFrame := frame.NewFrame()
 
-	// Read first frame to determine sample rate.
+	// Read first frame to determine format.
 	if _, err := mpFrame.Read(src, src.pos); err != nil {
-		return nil, saprobe.PCMFormat{}, fmt.Errorf("reading first mp3 frame: %w", err)
+		return nil, fmt.Errorf("reading first mp3 frame: %w", err)
 	}
 
-	format := saprobe.PCMFormat{
-		SampleRate: mpFrame.SampleRateHz(),
-		BitDepth:   saprobe.Depth16,
-		Channels:   channels,
+	// Calculate gapless trim in bytes.
+	startSamples := gapless.delay + decoderDelay
+	if gapless.hasXINGTag {
+		startSamples += gapless.samplesPerFrame
 	}
 
-	// Pre-allocate output buffer from file size and first frame's compression ratio.
-	var buf []byte
+	endSamples := max(gapless.padding-decoderDelay, 0)
 
-	if compressedSize := mpFrame.Header().FrameSize(); fileSize > 0 && compressedSize > 0 {
-		ratio := float64(mpFrame.BytesPerFrame()) / float64(compressedSize)
-		buf = make([]byte, 0, int(float64(fileSize)*ratio))
+	return &Decoder{
+		src:     src,
+		mpFrame: mpFrame,
+		format: saprobe.PCMFormat{
+			SampleRate: mpFrame.SampleRateHz(),
+			BitDepth:   saprobe.Depth16,
+			Channels:   channels,
+		},
+		startTrimRemaining: startSamples * bytesPerFrame,
+		endTrimBytes:       endSamples * bytesPerFrame,
+		firstRead:          true,
+	}, nil
+}
+
+// Format returns the PCM output format.
+func (d *Decoder) Format() saprobe.PCMFormat { return d.format }
+
+// Read reads decoded PCM bytes from the MP3 stream.
+func (d *Decoder) Read(p []byte) (int, error) { //nolint:varnamelen // p is idiomatic for io.Reader.Read
+	total := 0
+
+	for len(p) > 0 {
+		// Drain buffered output.
+		if d.bufOff < len(d.buf) {
+			n := copy(p, d.buf[d.bufOff:])
+			d.bufOff += n
+			total += n
+			p = p[n:]
+
+			continue
+		}
+
+		if d.eof {
+			if total > 0 {
+				return total, nil
+			}
+
+			return 0, io.EOF
+		}
+
+		// Decode next frame into d.buf (with gapless trimming applied).
+		if err := d.decodeNextFrame(); err != nil {
+			if total > 0 {
+				return total, nil
+			}
+
+			return 0, err
+		}
 	}
 
-	// Decode first frame.
-	decodeBuf := make([]byte, mpFrame.BytesPerFrame())
-	mpFrame.Decode(decodeBuf)
-	buf = append(buf, decodeBuf...)
+	return total, nil
+}
 
-	// Decode remaining frames.
-	for {
-		if _, readErr := mpFrame.Read(src, src.pos); readErr != nil {
+// decodeNextFrame reads and decodes the next MP3 frame, applying gapless
+// trimming, and stores the result in d.buf for Read to drain.
+// Returns io.EOF when the stream is exhausted.
+func (d *Decoder) decodeNextFrame() error {
+	decoded, err := d.readFrame()
+	if err != nil {
+		d.eof = true
+
+		return io.EOF
+	}
+
+	// Apply start trim.
+	if d.startTrimRemaining > 0 {
+		if d.startTrimRemaining >= len(decoded) {
+			d.startTrimRemaining -= len(decoded)
+
+			return d.decodeNextFrame() // Frame fully trimmed, advance to next.
+		}
+
+		decoded = decoded[d.startTrimRemaining:]
+		d.startTrimRemaining = 0
+	}
+
+	d.applyEndTrim(decoded)
+
+	return nil
+}
+
+// readFrame reads and decodes a single MP3 frame, returning raw PCM bytes.
+func (d *Decoder) readFrame() ([]byte, error) {
+	if d.firstRead {
+		d.firstRead = false
+	} else {
+		if _, readErr := d.mpFrame.Read(d.src, d.src.pos); readErr != nil {
 			if errors.Is(readErr, io.EOF) {
-				break
+				return nil, io.EOF
 			}
 
 			var unexpectedEOF *consts.UnexpectedEOF
 			if errors.As(readErr, &unexpectedEOF) {
-				break
+				return nil, io.EOF
 			}
 
-			return nil, saprobe.PCMFormat{}, fmt.Errorf("decoding mp3: %w", readErr)
+			return nil, fmt.Errorf("decoding mp3: %w", readErr)
 		}
-
-		needed := mpFrame.BytesPerFrame()
-		if cap(decodeBuf) < needed {
-			decodeBuf = make([]byte, needed)
-		}
-
-		decodeBuf = decodeBuf[:needed]
-		mpFrame.Decode(decodeBuf)
-		buf = append(buf, decodeBuf...)
 	}
 
-	buf = applyGaplessTrimming(buf, gapless)
+	buf := make([]byte, d.mpFrame.BytesPerFrame())
+	d.mpFrame.Decode(buf)
 
-	return buf, format, nil
+	return buf, nil
+}
+
+// applyEndTrim feeds decoded PCM through the end-trim hold buffer and
+// stores releasable bytes in d.buf.
+func (d *Decoder) applyEndTrim(decoded []byte) {
+	if d.endTrimBytes == 0 {
+		d.buf = decoded
+		d.bufOff = 0
+
+		return
+	}
+
+	// Combine holdBuf + decoded, then split: output all but last endTrimBytes.
+	combined := make([]byte, len(d.holdBuf)+len(decoded))
+	copy(combined, d.holdBuf)
+	copy(combined[len(d.holdBuf):], decoded)
+
+	if len(combined) <= d.endTrimBytes {
+		d.holdBuf = combined
+		d.buf = d.buf[:0]
+		d.bufOff = 0
+
+		return
+	}
+
+	release := len(combined) - d.endTrimBytes
+	d.buf = combined[:release]
+	d.bufOff = 0
+
+	d.holdBuf = make([]byte, d.endTrimBytes)
+	copy(d.holdBuf, combined[release:])
+}
+
+// Decode reads an MP3 stream and decodes it to interleaved little-endian signed 16-bit PCM bytes.
+// The output is always stereo (2 channels) at the source sample rate.
+// If the file contains LAME gapless metadata, encoder delay and padding are trimmed automatically.
+func Decode(reader io.ReadSeeker) ([]byte, saprobe.PCMFormat, error) {
+	dec, err := NewDecoder(reader)
+	if err != nil {
+		return nil, saprobe.PCMFormat{}, err
+	}
+
+	pcm, format, err := saprobe.ReadAll(dec)
+	if err != nil {
+		return nil, saprobe.PCMFormat{}, fmt.Errorf("decoding mp3: %w", err)
+	}
+
+	return pcm, format, nil
 }
 
 // skipTags skips past ID3v1 ("TAG") and ID3v2 ("ID3") headers at the start of the stream.
@@ -239,34 +366,6 @@ func skipTags(reader io.ReadSeeker) error {
 	}
 
 	return nil
-}
-
-// applyGaplessTrimming removes encoder delay from start and padding from end.
-// Accounts for: XING/Info frame decoded as audio, and synthesis filterbank priming delay.
-func applyGaplessTrimming(buf []byte, info gaplessInfo) []byte {
-	if info.delay == 0 && info.padding == 0 && !info.hasXINGTag {
-		return buf
-	}
-
-	// Calculate start trim: LAME delay + decoder delay + XING frame (if present).
-	startSamples := info.delay + decoderDelay
-	if info.hasXINGTag {
-		startSamples += info.samplesPerFrame
-	}
-
-	// Calculate end trim: LAME padding - decoder delay (decoder delay shifts from end to start).
-	endSamples := max(info.padding-decoderDelay, 0)
-
-	startBytes := startSamples * bytesPerFrame
-	endBytes := endSamples * bytesPerFrame
-	totalTrim := startBytes + endBytes
-
-	// Sanity check: don't trim more than we have.
-	if totalTrim >= len(buf) {
-		return buf
-	}
-
-	return buf[startBytes : len(buf)-endBytes]
 }
 
 // parseGaplessInfo attempts to extract LAME encoder delay and padding from the MP3 file.

@@ -347,7 +347,7 @@ func (f *Frame) stereo(gr int, sfBandLong, sfBandShort []int) {
 
 //nolint:varnamelen // gr, sfb are MPEG spec terminology
 func (f *Frame) intensityStereoLong(gr, sfb int, sfBandLong []int) {
-	isPos := f.mainData.ScalefacL[gr][0][sfb]
+	isPos := f.mainData.ScalefacL[gr][1][sfb]
 	if isPos >= 7 {
 		return
 	}
@@ -366,7 +366,7 @@ func (f *Frame) intensityStereoShort(gr, sfb int, sfBandShort []int) {
 	winLen := sfBandShort[sfb+1] - sfBandShort[sfb]
 
 	for win := range 3 {
-		isPos := f.mainData.ScalefacS[gr][0][sfb][win]
+		isPos := f.mainData.ScalefacS[gr][1][sfb][win]
 		if isPos >= 7 {
 			continue
 		}
