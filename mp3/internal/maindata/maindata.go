@@ -113,13 +113,18 @@ func initSlen() (nSlen2 [512]int) {
 // Read reads and parses the main data from an MP3 frame into dst.
 // The caller provides dst (typically embedded in Frame as a value field)
 // and res (the persistent bit reservoir, also embedded in Frame).
+//
+// Returns (true, nil) on success. When the reservoir has insufficient data
+// for MainDataBegin, the frame's main data is consumed into the reservoir
+// for subsequent frames but decoding is skipped — returns (false, nil).
+// The caller should output silence for that frame.
 func Read(
 	source consts.FullReader,
 	header *frameheader.Header,
 	sideInfo *sideinfo.SideInfo,
 	dst *MainData,
 	res *Reservoir,
-) error {
+) (bool, error) {
 	nch := header.Channels()
 
 	// Main data size is the frame minus header (4 bytes), side info, and optional CRC (2 bytes).
@@ -132,55 +137,62 @@ func Read(
 
 	// Build the bitstream from reservoir tail + current frame data.
 	if offset > res.len {
-		// Insufficient reservoir — append current data and proceed.
-		// The bitstream position won't align with MainDataBegin, but we replicate
-		// the original behavior for compatibility.
-		if res.len+mainDataSize > len(res.buf) {
+		// Insufficient reservoir — consume the current frame's main data so it's
+		// available to subsequent frames, but signal the caller to skip decoding.
+		// This matches minimp3's behavior: output silence, preserve reservoir state.
+		if mainDataSize > len(res.buf) {
 			//nolint:err113 // runtime value in error message required for debugging
-			return fmt.Errorf("mp3: maindata reservoir overflow: %d + %d > %d", res.len, mainDataSize, len(res.buf))
+			return false, fmt.Errorf("mp3: maindata reservoir overflow: %d > %d", mainDataSize, len(res.buf))
 		}
 
-		count, err := source.ReadFull(res.buf[res.len : res.len+mainDataSize])
+		count, err := source.ReadFull(res.buf[:mainDataSize])
 		if count < mainDataSize {
 			if errors.Is(err, io.EOF) {
-				return &consts.UnexpectedEOF{At: "maindata.Read (1)"}
+				return false, &consts.UnexpectedEOF{At: "maindata.Read (1)"}
 			}
 
-			return fmt.Errorf("mp3: maindata.Read (1): %w", err)
+			return false, fmt.Errorf("mp3: maindata.Read (1): %w", err)
 		}
 
-		res.len += mainDataSize
-	} else {
-		// Normal path: shift reservoir tail to start of buffer, then read current data.
-		if offset+mainDataSize > len(res.buf) {
-			//nolint:err113 // runtime value in error message required for debugging
-			return fmt.Errorf("mp3: maindata reservoir overflow: %d + %d > %d", offset, mainDataSize, len(res.buf))
-		}
+		res.len = mainDataSize
 
-		tailStart := res.len - offset
-		copy(res.buf[:offset], res.buf[tailStart:res.len])
-
-		count, err := source.ReadFull(res.buf[offset : offset+mainDataSize])
-		if count < mainDataSize {
-			if errors.Is(err, io.EOF) {
-				return &consts.UnexpectedEOF{At: "maindata.Read (2)"}
-			}
-
-			return fmt.Errorf("mp3: maindata.Read (2): %w", err)
-		}
-
-		res.len = offset + mainDataSize
+		return false, nil
 	}
+
+	// Normal path: shift reservoir tail to start of buffer, then read current data.
+	if offset+mainDataSize > len(res.buf) {
+		//nolint:err113 // runtime value in error message required for debugging
+		return false, fmt.Errorf(
+			"mp3: maindata reservoir overflow: %d + %d > %d",
+			offset,
+			mainDataSize,
+			len(res.buf),
+		)
+	}
+
+	tailStart := res.len - offset
+	copy(res.buf[:offset], res.buf[tailStart:res.len])
+
+	count, err := source.ReadFull(res.buf[offset : offset+mainDataSize])
+	if count < mainDataSize {
+		if errors.Is(err, io.EOF) {
+			return false, &consts.UnexpectedEOF{At: "maindata.Read (2)"}
+		}
+
+		return false, fmt.Errorf("mp3: maindata.Read (2): %w", err)
+	}
+
+	res.len = offset + mainDataSize
 
 	// Stack-local bit reader over the reservoir buffer — zero heap allocation.
 	var reader bits.Reader
 	reader.Reset(res.buf[:res.len])
 
 	if header.LowSamplingFrequency() == 1 {
-		return getScaleFactorsMpeg2(&reader, header, sideInfo, dst)
+		return true, getScaleFactorsMpeg2(&reader, header, sideInfo, dst)
 	}
 
-	return getScaleFactorsMpeg1(nch, &reader, header, sideInfo, dst)
+	return true, getScaleFactorsMpeg1(nch, &reader, header, sideInfo, dst)
 }
 
 //nolint:revive // cognitive complexity mirrors the MPEG1 spec's branching structure

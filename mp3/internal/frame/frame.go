@@ -20,10 +20,11 @@ import (
 // state (bit reservoir, IMDCT overlap-add, polyphase synthesis FIFO) is carried
 // forward automatically.
 type Frame struct {
-	header    *frameheader.Header
-	sideInfo  sideinfo.SideInfo
-	mainData  maindata.MainData
-	reservoir maindata.Reservoir
+	header     *frameheader.Header
+	sideInfo   sideinfo.SideInfo
+	mainData   maindata.MainData
+	reservoir  maindata.Reservoir
+	skipDecode bool // true when reservoir was insufficient; caller should output silence
 
 	// IMDCT overlap-add store, indexed [channel][subband][sample].
 	store [2][32][18]float32
@@ -69,9 +70,12 @@ func (f *Frame) Read(source consts.FullReader, position int64) (int64, error) {
 		return 0, fmt.Errorf("mp3: frame.Read sideinfo: %w", err)
 	}
 
-	if err := maindata.Read(source, f.header, &f.sideInfo, &f.mainData, &f.reservoir); err != nil {
+	ok, err := maindata.Read(source, f.header, &f.sideInfo, &f.mainData, &f.reservoir)
+	if err != nil {
 		return 0, fmt.Errorf("mp3: frame.Read maindata: %w", err)
 	}
+
+	f.skipDecode = !ok
 
 	return pos, nil
 }
@@ -91,6 +95,12 @@ func (f *Frame) Header() *frameheader.Header { return f.header }
 //
 //nolint:varnamelen // gr, ch, nch mirror MPEG spec terminology
 func (f *Frame) Decode(dst []byte) int {
+	if f.skipDecode {
+		clear(dst[:f.header.BytesPerFrame()])
+
+		return f.header.BytesPerFrame()
+	}
+
 	nch := f.header.Channels()
 	sfreq := f.header.SamplingFrequency()
 	lsf := f.header.LowSamplingFrequency()
@@ -493,8 +503,8 @@ func (f *Frame) subbandSynthesis(gr, ch int, out []byte) {
 			samp := int(sum * 32767)
 			if samp > 32767 {
 				samp = 32767
-			} else if samp < -32767 {
-				samp = -32767
+			} else if samp < -32768 {
+				samp = -32768
 			}
 
 			s := int16(samp) //nolint:gosec // clamped to int16 range above

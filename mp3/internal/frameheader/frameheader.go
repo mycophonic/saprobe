@@ -9,6 +9,11 @@ import (
 	"github.com/mycophonic/saprobe/mp3/internal/consts"
 )
 
+// maxSyncScan is the maximum number of bytes the sync loop will scan before
+// giving up. 128 KB is well beyond any legitimate inter-frame gap while
+// preventing unbounded reads on malformed or non-MP3 input.
+const maxSyncScan = 128 * 1024
+
 // Sentinel errors returned by Parse.
 var (
 	ErrInvalidSync      = errors.New("frameheader: invalid sync word")
@@ -20,6 +25,7 @@ var (
 	ErrFreeBitrate      = errors.New("frameheader: free bitrate not supported")
 	ErrReservedSfreq    = errors.New("frameheader: reserved sampling frequency")
 	ErrInvalidEmphasis  = errors.New("frameheader: invalid emphasis value")
+	ErrSyncNotFound     = errors.New("frameheader: sync not found within scan limit")
 )
 
 // Bit field extraction constants.
@@ -323,8 +329,8 @@ func Read(source consts.FullReader, position int64) (Header, int64, error) {
 		return header, position, nil
 	}
 
-	// Sync loop: slide one byte at a time.
-	for {
+	// Sync loop: slide one byte at a time, bounded to prevent DoS on malformed input.
+	for range maxSyncScan {
 		copy(buf[:3], buf[1:4])
 
 		if _, err = source.ReadFull(buf[3:4]); err != nil {
@@ -344,4 +350,6 @@ func Read(source consts.FullReader, position int64) (Header, int64, error) {
 			return header, position, nil
 		}
 	}
+
+	return Header{}, 0, ErrSyncNotFound
 }
