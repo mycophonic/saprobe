@@ -6,7 +6,7 @@
 
 ## Purpose
 
-Saprobe provides a pure golang library and cli that supports decoding FLAC, ALAC, DSD, MP3, WAV, and OggVorbis.
+Saprobe provides a highly optimized, pure golang library and cli that supports decoding FLAC, ALAC, DSD, MP3, WAV, and OggVorbis.
 
 New implementations:
 - ALAC is a from scratch port of the Apple library to Go (with some help from github.com/abema/go-mp4
