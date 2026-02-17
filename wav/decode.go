@@ -1,3 +1,19 @@
+/*
+   Copyright Mycophonic.
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
 // Package wav implements WAV (RIFF WAVE) encoding and decoding for PCM audio.
 package wav
 
@@ -21,6 +37,7 @@ var wavBitDepths = []saprobe.BitDepth{
 // WAV format constants.
 const (
 	wavFormatPCM        = 1
+	wavFormatIEEEFloat  = 3
 	wavFormatExtensible = 0xFFFE
 )
 
@@ -56,6 +73,14 @@ var wavGUIDPCM = [16]byte{
 	0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71,
 }
 
+// GUID for IEEE float in WAVEFORMATEXTENSIBLE.
+//
+//nolint:gochecknoglobals
+var wavGUIDFloat = [16]byte{
+	0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00,
+	0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71,
+}
+
 // ErrNotWAV indicates the input is not a valid WAV file.
 var ErrNotWAV = errors.New("not a WAV file")
 
@@ -71,24 +96,33 @@ var ErrNoDataChunk = errors.New("missing data chunk")
 // ErrInvalidBitDepth indicates an unsupported bit depth for WAV encoding or decoding.
 var ErrInvalidBitDepth = errors.New("invalid bit depth")
 
-// Decode reads a WAV file and returns raw PCM samples.
-func Decode(reader io.ReadSeeker) ([]byte, saprobe.PCMFormat, error) {
+// Decoder streams decoded PCM from a WAV source.
+type Decoder struct {
+	reader   io.Reader
+	format   saprobe.PCMFormat
+	dataSize int64
+	read     int64
+}
+
+// NewDecoder opens a WAV file and returns a streaming decoder.
+// The fmt chunk is parsed immediately; PCM data is read on demand via Read.
+func NewDecoder(reader io.ReadSeeker) (*Decoder, error) {
 	var format saprobe.PCMFormat
 
-	// Read RIFF header
+	// Read RIFF header.
 	var riffHeader [12]byte
 	if _, err := io.ReadFull(reader, riffHeader[:]); err != nil {
-		return nil, format, fmt.Errorf("reading RIFF header: %w", err)
+		return nil, fmt.Errorf("reading RIFF header: %w", err)
 	}
 
 	if string(riffHeader[0:4]) != chunkRIFF || string(riffHeader[8:12]) != chunkWAVE {
-		return nil, format, ErrNotWAV
+		return nil, ErrNotWAV
 	}
 
-	// Parse chunks
-	var pcmData []byte
-
+	// Parse chunks until we find both fmt and data.
 	fmtFound := false
+
+	var dataSize uint32
 
 	for {
 		var chunkHeader [8]byte
@@ -97,7 +131,7 @@ func Decode(reader io.ReadSeeker) ([]byte, saprobe.PCMFormat, error) {
 				break
 			}
 
-			return nil, format, fmt.Errorf("reading chunk header: %w", err)
+			return nil, fmt.Errorf("reading chunk header: %w", err)
 		}
 
 		chunkID := string(chunkHeader[0:4])
@@ -106,41 +140,68 @@ func Decode(reader io.ReadSeeker) ([]byte, saprobe.PCMFormat, error) {
 		switch chunkID {
 		case chunkFmt:
 			if err := parseFmtChunk(reader, chunkSize, &format); err != nil {
-				return nil, format, err
+				return nil, err
 			}
 
 			fmtFound = true
 
 		case chunkData:
-			pcmData = make([]byte, chunkSize)
-			if _, err := io.ReadFull(reader, pcmData); err != nil {
-				return nil, format, fmt.Errorf("reading PCM data: %w", err)
+			if !fmtFound {
+				return nil, ErrNoFmtChunk
 			}
 
+			dataSize = chunkSize
+
+			// Reader is now positioned at the start of PCM data.
+			return &Decoder{
+				reader:   reader,
+				format:   format,
+				dataSize: int64(dataSize),
+			}, nil
+
 		default:
-			// Skip unknown chunks
 			if _, err := reader.Seek(int64(chunkSize), io.SeekCurrent); err != nil {
-				return nil, format, fmt.Errorf("skipping chunk %s: %w", chunkID, err)
+				return nil, fmt.Errorf("skipping chunk %s: %w", chunkID, err)
 			}
 		}
 
-		// Chunks are word-aligned (pad byte if odd size)
+		// Chunks are word-aligned (pad byte if odd size).
 		if chunkSize%2 == 1 {
 			if _, err := reader.Seek(1, io.SeekCurrent); err != nil {
-				return nil, format, fmt.Errorf("seeking past pad byte: %w", err)
+				return nil, fmt.Errorf("seeking past pad byte: %w", err)
 			}
 		}
 	}
 
 	if !fmtFound {
-		return nil, format, ErrNoFmtChunk
+		return nil, ErrNoFmtChunk
 	}
 
-	if pcmData == nil {
-		return nil, format, ErrNoDataChunk
+	return nil, ErrNoDataChunk
+}
+
+// Format returns the PCM output format.
+func (d *Decoder) Format() saprobe.PCMFormat { return d.format }
+
+// Read reads decoded PCM bytes from the WAV data chunk.
+func (d *Decoder) Read(p []byte) (int, error) { //nolint:varnamelen // p is idiomatic for io.Reader.Read
+	remaining := d.dataSize - d.read
+	if remaining <= 0 {
+		return 0, io.EOF
 	}
 
-	return pcmData, format, nil
+	if int64(len(p)) > remaining {
+		p = p[:remaining]
+	}
+
+	n, err := d.reader.Read(p) //nolint:varnamelen // n is idiomatic for read count
+	d.read += int64(n)
+
+	if d.read >= d.dataSize && err == nil {
+		err = io.EOF
+	}
+
+	return n, err
 }
 
 func parseFmtChunk(reader io.ReadSeeker, size uint32, format *saprobe.PCMFormat) error {
@@ -170,9 +231,14 @@ func parseFmtChunk(reader io.ReadSeeker, size uint32, format *saprobe.PCMFormat)
 	// blockAlign at buf[12:14] - not needed
 	bitsPerSample := binary.LittleEndian.Uint16(buf[14:16])
 
+	isFloat := false
+
 	switch audioFormat {
 	case wavFormatPCM:
-		// Standard PCM, we're good
+	// Standard integer PCM.
+
+	case wavFormatIEEEFloat:
+		isFloat = true
 
 	case wavFormatExtensible:
 		if size < fmtExtensibleSize {
@@ -184,8 +250,13 @@ func parseFmtChunk(reader io.ReadSeeker, size uint32, format *saprobe.PCMFormat)
 		var subFormat [16]byte
 		copy(subFormat[:], buf[24:fmtExtensibleSize])
 
-		if subFormat != wavGUIDPCM {
-			return ErrUnsupportedFmt // Not PCM (could be float, etc.)
+		switch subFormat {
+		case wavGUIDPCM:
+		// Integer PCM.
+		case wavGUIDFloat:
+			isFloat = true
+		default:
+			return ErrUnsupportedFmt
 		}
 
 	default:
@@ -194,6 +265,7 @@ func parseFmtChunk(reader io.ReadSeeker, size uint32, format *saprobe.PCMFormat)
 
 	format.SampleRate = int(sampleRate)
 	format.Channels = uint(channels)
+	format.IsFloat = isFloat
 
 	bitDepth := saprobe.BitDepth(bitsPerSample)
 	if !slices.Contains(wavBitDepths, bitDepth) {
@@ -203,137 +275,4 @@ func parseFmtChunk(reader io.ReadSeeker, size uint32, format *saprobe.PCMFormat)
 	format.BitDepth = bitDepth
 
 	return nil
-}
-
-// Encode writes PCM samples as a WAV file.
-func Encode(writer io.Writer, pcm []byte, format saprobe.PCMFormat) error {
-	if !slices.Contains(wavBitDepths, format.BitDepth) {
-		return fmt.Errorf("%w: %d", ErrInvalidBitDepth, format.BitDepth)
-	}
-
-	channels := uint16(format.Channels)      //nolint:gosec // Channels is 1-8, validated by caller.
-	sampleRate := uint32(format.SampleRate)  //nolint:gosec // Sample rate is positive, fits uint32.
-	bitsPerSample := uint16(format.BitDepth) //nolint:gosec // BitDepth is validated above (16/24/32).
-	byteRate := sampleRate * uint32(channels) * uint32(bitsPerSample) / 8
-	blockAlign := channels * bitsPerSample / 8
-	dataSize := uint32(len(pcm)) //nolint:gosec // PCM length is bounded by available memory.
-
-	// Use WAVEFORMATEXTENSIBLE for >2 channels or >16 bits
-	useExtensible := channels > 2 || bitsPerSample > 16
-
-	if useExtensible {
-		return writeWAVExtensible(writer, pcm, channels, sampleRate, bitsPerSample, byteRate, blockAlign, dataSize)
-	}
-
-	return writeWAVSimple(writer, pcm, channels, sampleRate, bitsPerSample, byteRate, blockAlign, dataSize)
-}
-
-func writeWAVSimple(
-	writer io.Writer,
-	pcm []byte,
-	channels uint16,
-	sampleRate uint32,
-	bitsPerSample uint16,
-	byteRate uint32,
-	blockAlign uint16,
-	dataSize uint32,
-) error {
-	var header [44]byte
-
-	copy(header[0:4], chunkRIFF)
-	binary.LittleEndian.PutUint32(header[4:8], dataSize+36)
-	copy(header[8:12], chunkWAVE)
-	copy(header[12:16], chunkFmt)
-	binary.LittleEndian.PutUint32(header[16:20], 16) // fmt chunk size
-	binary.LittleEndian.PutUint16(header[20:22], wavFormatPCM)
-	binary.LittleEndian.PutUint16(header[22:24], channels)
-	binary.LittleEndian.PutUint32(header[24:28], sampleRate)
-	binary.LittleEndian.PutUint32(header[28:32], byteRate)
-	binary.LittleEndian.PutUint16(header[32:34], blockAlign)
-	binary.LittleEndian.PutUint16(header[34:36], bitsPerSample)
-	copy(header[36:40], chunkData)
-	binary.LittleEndian.PutUint32(header[40:44], dataSize)
-
-	if _, err := writer.Write(header[:]); err != nil {
-		return fmt.Errorf("writing WAV header: %w", err)
-	}
-
-	if _, err := writer.Write(pcm); err != nil {
-		return fmt.Errorf("writing PCM data: %w", err)
-	}
-
-	return nil
-}
-
-func writeWAVExtensible(
-	writer io.Writer,
-	pcm []byte,
-	channels uint16,
-	sampleRate uint32,
-	bitsPerSample uint16,
-	byteRate uint32,
-	blockAlign uint16,
-	dataSize uint32,
-) error {
-	// WAVEFORMATEXTENSIBLE: fmt chunk is 40 bytes instead of 16
-	fmtChunkSize := uint32(fmtExtensibleSize)
-	headerSize := riffHeaderSize + 8 + fmtChunkSize + 8 // RIFF + fmt header + fmt data + data header
-	fileSize := headerSize + dataSize - 8               // -8 for RIFF header not counted
-
-	var header [68]byte // 12 + 8 + 40 + 8
-
-	// RIFF header
-	copy(header[0:4], chunkRIFF)
-	binary.LittleEndian.PutUint32(header[4:8], fileSize)
-	copy(header[8:12], chunkWAVE)
-
-	// fmt chunk header
-	copy(header[12:16], chunkFmt)
-	binary.LittleEndian.PutUint32(header[16:20], fmtChunkSize)
-
-	// WAVEFORMATEX part
-	binary.LittleEndian.PutUint16(header[20:22], wavFormatExtensible)
-	binary.LittleEndian.PutUint16(header[22:24], channels)
-	binary.LittleEndian.PutUint32(header[24:28], sampleRate)
-	binary.LittleEndian.PutUint32(header[28:32], byteRate)
-	binary.LittleEndian.PutUint16(header[32:34], blockAlign)
-	binary.LittleEndian.PutUint16(header[34:36], bitsPerSample)
-	binary.LittleEndian.PutUint16(header[36:38], cbSizeExtensible)
-
-	// WAVEFORMATEXTENSIBLE extension
-	binary.LittleEndian.PutUint16(header[38:40], bitsPerSample) // validBitsPerSample
-	binary.LittleEndian.PutUint32(header[40:44], speakerMask(channels))
-	copy(header[44:60], wavGUIDPCM[:])
-
-	// data chunk header
-	copy(header[60:64], chunkData)
-	binary.LittleEndian.PutUint32(header[64:68], dataSize)
-
-	if _, err := writer.Write(header[:]); err != nil {
-		return fmt.Errorf("writing WAV header: %w", err)
-	}
-
-	if _, err := writer.Write(pcm); err != nil {
-		return fmt.Errorf("writing PCM data: %w", err)
-	}
-
-	return nil
-}
-
-// speakerMask returns standard speaker position mask for common channel configurations.
-func speakerMask(channels uint16) uint32 {
-	switch channels {
-	case 1:
-		return channelMaskMono
-	case 2:
-		return channelMaskStereo
-	case 4:
-		return channelMaskQuad
-	case 6:
-		return channelMask51
-	case 8:
-		return channelMask71
-	default:
-		return 0 // Unspecified
-	}
 }

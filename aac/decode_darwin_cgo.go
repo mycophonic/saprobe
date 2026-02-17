@@ -1,164 +1,181 @@
 //go:build with_aac && darwin
 
+/*
+   Copyright Mycophonic.
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
 package aac
 
 /*
-#cgo LDFLAGS: -framework AudioToolbox -framework CoreFoundation
-#include <AudioToolbox/AudioToolbox.h>
-#include <stdlib.h>
-#include <string.h>
+   #cgo LDFLAGS: -framework AudioToolbox -framework CoreFoundation
+   #include <AudioToolbox/AudioToolbox.h>
+   #include <stdlib.h>
+   #include <string.h>
 
-typedef struct {
-	const char *data;
-	int64_t     size;
-} aac_reader;
+   typedef struct {
+        const char *data;
+        int64_t     size;
+   } aac_reader;
 
-static OSStatus aac_read_proc(
-	void   *inClientData,
-	SInt64  inPosition,
-	UInt32  requestCount,
-	void   *buffer,
-	UInt32 *actualCount
-) {
-	aac_reader *r = (aac_reader *)inClientData;
-	if (inPosition >= r->size) {
-		*actualCount = 0;
-		return noErr;
-	}
-	int64_t available = r->size - inPosition;
-	UInt32 toRead = requestCount;
-	if ((int64_t)toRead > available) {
-		toRead = (UInt32)available;
-	}
-	memcpy(buffer, r->data + inPosition, toRead);
-	*actualCount = toRead;
-	return noErr;
-}
+   static OSStatus aac_read_proc(
+        void   *inClientData,
+        SInt64  inPosition,
+        UInt32  requestCount,
+        void   *buffer,
+        UInt32 *actualCount
+   ) {
+        aac_reader *r = (aac_reader *)inClientData;
+        if (inPosition >= r->size) {
+            *actualCount = 0;
+            return noErr;
+        }
+        int64_t available = r->size - inPosition;
+        UInt32 toRead = requestCount;
+        if ((int64_t)toRead > available) {
+            toRead = (UInt32)available;
+        }
+        memcpy(buffer, r->data + inPosition, toRead);
+        *actualCount = toRead;
+        return noErr;
+   }
 
-static SInt64 aac_get_size_proc(void *inClientData) {
-	aac_reader *r = (aac_reader *)inClientData;
-	return (SInt64)r->size;
-}
+   static SInt64 aac_get_size_proc(void *inClientData) {
+        aac_reader *r = (aac_reader *)inClientData;
+        return (SInt64)r->size;
+   }
 
-// decode_aac decodes AAC from an in-memory M4A buffer via AudioToolbox.
-// On success (return 0), caller must free(*outBuf).
-static int decode_aac(
-	const char *data, int64_t dataSize,
-	char **outBuf, int64_t *outBufSize,
-	int *outSampleRate, int *outChannels
-) {
-	aac_reader reader;
-	reader.data = data;
-	reader.size = dataSize;
+   // decode_aac decodes AAC from an in-memory M4A buffer via AudioToolbox.
+   // On success (return 0), caller must free(*outBuf).
+   static int decode_aac(
+        const char *data, int64_t dataSize,
+        char **outBuf, int64_t *outBufSize,
+        int *outSampleRate, int *outChannels
+   ) {
+        aac_reader reader;
+        reader.data = data;
+        reader.size = dataSize;
 
-	AudioFileID audioFile = NULL;
+        AudioFileID audioFile = NULL;
 	OSStatus status = AudioFileOpenWithCallbacks(
-		&reader,
-		aac_read_proc,
-		NULL,
-		aac_get_size_proc,
-		NULL,
-		kAudioFileM4AType,
-		&audioFile
-	);
-	if (status != noErr) return (int)status;
+            &reader,
+            aac_read_proc,
+            NULL,
+            aac_get_size_proc,
+            NULL,
+            kAudioFileM4AType,
+            &audioFile
+        );
+        if (status != noErr) return (int)status;
 
-	ExtAudioFileRef extFile = NULL;
-	status = ExtAudioFileWrapAudioFileID(audioFile, false, &extFile);
-	if (status != noErr) {
-		AudioFileClose(audioFile);
-		return (int)status;
-	}
+        ExtAudioFileRef extFile = NULL;
+        status = ExtAudioFileWrapAudioFileID(audioFile, false, &extFile);
+        if (status != noErr) {
+            AudioFileClose(audioFile);
+            return (int)status;
+        }
 
-	// Query source format for sample rate and channel count.
-	AudioStreamBasicDescription srcFormat;
-	UInt32 propSize = sizeof(srcFormat);
-	status = ExtAudioFileGetProperty(
-		extFile, kExtAudioFileProperty_FileDataFormat, &propSize, &srcFormat
-	);
-	if (status != noErr) {
-		ExtAudioFileDispose(extFile);
-		AudioFileClose(audioFile);
-		return (int)status;
-	}
+        // Query source format for sample rate and channel count.
+        AudioStreamBasicDescription srcFormat;
+        UInt32 propSize = sizeof(srcFormat);
+        status = ExtAudioFileGetProperty(
+            extFile, kExtAudioFileProperty_FileDataFormat, &propSize, &srcFormat
+        );
+        if (status != noErr) {
+            ExtAudioFileDispose(extFile);
+            AudioFileClose(audioFile);
+            return (int)status;
+        }
 
-	*outSampleRate = (int)srcFormat.mSampleRate;
-	*outChannels   = (int)srcFormat.mChannelsPerFrame;
+        *outSampleRate = (int)srcFormat.mSampleRate;
+        *outChannels   = (int)srcFormat.mChannelsPerFrame;
 
-	// Client format: 16-bit signed integer, little-endian (native on macOS), interleaved.
-	AudioStreamBasicDescription clientFormat;
-	memset(&clientFormat, 0, sizeof(clientFormat));
-	clientFormat.mSampleRate       = srcFormat.mSampleRate;
-	clientFormat.mFormatID         = kAudioFormatLinearPCM;
-	clientFormat.mFormatFlags      = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked;
-	clientFormat.mBitsPerChannel   = 16;
-	clientFormat.mChannelsPerFrame = srcFormat.mChannelsPerFrame;
-	clientFormat.mBytesPerFrame    = 2 * srcFormat.mChannelsPerFrame;
-	clientFormat.mFramesPerPacket  = 1;
-	clientFormat.mBytesPerPacket   = clientFormat.mBytesPerFrame;
+        // Client format: 16-bit signed integer, little-endian (native on macOS), interleaved.
+        AudioStreamBasicDescription clientFormat;
+        memset(&clientFormat, 0, sizeof(clientFormat));
+        clientFormat.mSampleRate       = srcFormat.mSampleRate;
+        clientFormat.mFormatID         = kAudioFormatLinearPCM;
+        clientFormat.mFormatFlags      = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked;
+        clientFormat.mBitsPerChannel   = 16;
+        clientFormat.mChannelsPerFrame = srcFormat.mChannelsPerFrame;
+        clientFormat.mBytesPerFrame    = 2 * srcFormat.mChannelsPerFrame;
+        clientFormat.mFramesPerPacket  = 1;
+        clientFormat.mBytesPerPacket   = clientFormat.mBytesPerFrame;
 
-	status = ExtAudioFileSetProperty(
-		extFile, kExtAudioFileProperty_ClientDataFormat, sizeof(clientFormat), &clientFormat
-	);
-	if (status != noErr) {
-		ExtAudioFileDispose(extFile);
-		AudioFileClose(audioFile);
-		return (int)status;
-	}
+        status = ExtAudioFileSetProperty(
+            extFile, kExtAudioFileProperty_ClientDataFormat, sizeof(clientFormat), &clientFormat
+        );
+        if (status != noErr) {
+            ExtAudioFileDispose(extFile);
+            AudioFileClose(audioFile);
+            return (int)status;
+        }
 
-	// Total frame count for buffer allocation.
-	SInt64 totalFrames = 0;
-	propSize = sizeof(totalFrames);
-	status = ExtAudioFileGetProperty(
-		extFile, kExtAudioFileProperty_FileLengthFrames, &propSize, &totalFrames
-	);
-	if (status != noErr || totalFrames <= 0) {
-		ExtAudioFileDispose(extFile);
-		AudioFileClose(audioFile);
-		return status != noErr ? (int)status : -1;
-	}
+        // Total frame count for buffer allocation.
+        SInt64 totalFrames = 0;
+        propSize = sizeof(totalFrames);
+        status = ExtAudioFileGetProperty(
+            extFile, kExtAudioFileProperty_FileLengthFrames, &propSize, &totalFrames
+        );
+        if (status != noErr || totalFrames <= 0) {
+            ExtAudioFileDispose(extFile);
+            AudioFileClose(audioFile);
+            return status != noErr ? (int)status : -1;
+        }
 
-	int64_t bufSize = totalFrames * clientFormat.mBytesPerFrame;
-	char *buf = (char *)malloc(bufSize);
-	if (!buf) {
-		ExtAudioFileDispose(extFile);
-		AudioFileClose(audioFile);
-		return -1;
-	}
+        int64_t bufSize = totalFrames * clientFormat.mBytesPerFrame;
+        char *buf = (char *)malloc(bufSize);
+        if (!buf) {
+            ExtAudioFileDispose(extFile);
+            AudioFileClose(audioFile);
+            return -1;
+        }
 
-	// Read all decoded PCM frames.
-	int64_t framesRead = 0;
-	while (framesRead < totalFrames) {
-		UInt32 frameCount = (UInt32)(totalFrames - framesRead);
+        // Read all decoded PCM frames.
+        int64_t framesRead = 0;
+        while (framesRead < totalFrames) {
+            UInt32 frameCount = (UInt32)(totalFrames - framesRead);
 
-		AudioBufferList bufList;
-		bufList.mNumberBuffers = 1;
-		bufList.mBuffers[0].mNumberChannels = srcFormat.mChannelsPerFrame;
-		bufList.mBuffers[0].mDataByteSize   = frameCount * clientFormat.mBytesPerFrame;
-		bufList.mBuffers[0].mData           = buf + framesRead * clientFormat.mBytesPerFrame;
+            AudioBufferList bufList;
+            bufList.mNumberBuffers = 1;
+            bufList.mBuffers[0].mNumberChannels = srcFormat.mChannelsPerFrame;
+            bufList.mBuffers[0].mDataByteSize   = frameCount * clientFormat.mBytesPerFrame;
+            bufList.mBuffers[0].mData           = buf + framesRead * clientFormat.mBytesPerFrame;
 
-		status = ExtAudioFileRead(extFile, &frameCount, &bufList);
-		if (status != noErr) {
-			free(buf);
-			ExtAudioFileDispose(extFile);
-			AudioFileClose(audioFile);
-			return (int)status;
-		}
-		if (frameCount == 0) break;
-		framesRead += frameCount;
-	}
+            status = ExtAudioFileRead(extFile, &frameCount, &bufList);
+            if (status != noErr) {
+                free(buf);
+                ExtAudioFileDispose(extFile);
+                AudioFileClose(audioFile);
+                return (int)status;
+            }
+            if (frameCount == 0) break;
+            framesRead += frameCount;
+        }
 
-	*outBuf     = buf;
-	*outBufSize = framesRead * clientFormat.mBytesPerFrame;
+        *outBuf     = buf;
+        *outBufSize = framesRead * clientFormat.mBytesPerFrame;
 
-	ExtAudioFileDispose(extFile);
-	AudioFileClose(audioFile);
-	return 0;
-}
+        ExtAudioFileDispose(extFile);
+        AudioFileClose(audioFile);
+        return 0;
+   }
 */
 import "C"
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"unsafe"
@@ -166,15 +183,17 @@ import (
 	"github.com/mycophonic/saprobe"
 )
 
-// Decode reads an M4A/AAC stream and returns decoded 16-bit PCM via CoreAudio.
-func Decode(rs io.ReadSeeker) ([]byte, saprobe.PCMFormat, error) {
+// NewDecoder opens an M4A/AAC stream and returns a streaming decoder.
+// The entire file is decoded upfront via CoreAudio; Read then drains from
+// the in-memory result.
+func NewDecoder(rs io.ReadSeeker) (*Decoder, error) {
 	data, err := io.ReadAll(rs)
 	if err != nil {
-		return nil, saprobe.PCMFormat{}, fmt.Errorf("aac: reading input: %w", err)
+		return nil, fmt.Errorf("aac: reading input: %w", err)
 	}
 
 	if len(data) == 0 {
-		return nil, saprobe.PCMFormat{}, fmt.Errorf("aac: empty input")
+		return nil, fmt.Errorf("aac: empty input")
 	}
 
 	cData := C.CBytes(data)
@@ -193,18 +212,34 @@ func Decode(rs io.ReadSeeker) ([]byte, saprobe.PCMFormat, error) {
 		&sampleRate, &channels,
 	)
 	if result != 0 {
-		return nil, saprobe.PCMFormat{}, fmt.Errorf("aac: CoreAudio error (OSStatus %d)", int(result))
+		return nil, fmt.Errorf("aac: CoreAudio error (OSStatus %d)", int(result))
 	}
 
 	defer C.free(unsafe.Pointer(outBuf))
 
 	pcm := C.GoBytes(unsafe.Pointer(outBuf), C.int(outSize))
 
-	format := saprobe.PCMFormat{
-		SampleRate: int(sampleRate),
-		BitDepth:   saprobe.Depth16,
-		Channels:   uint(channels),
+	return &Decoder{
+		reader: bytes.NewReader(pcm),
+		format: saprobe.PCMFormat{
+			SampleRate: int(sampleRate),
+			BitDepth:   saprobe.Depth16,
+			Channels:   uint(channels),
+		},
+	}, nil
+}
+
+// Decode reads an M4A/AAC stream and returns decoded 16-bit PCM via CoreAudio.
+func Decode(rs io.ReadSeeker) ([]byte, saprobe.PCMFormat, error) {
+	dec, err := NewDecoder(rs)
+	if err != nil {
+		return nil, saprobe.PCMFormat{}, err
 	}
 
-	return pcm, format, nil
+	pcm, readErr := io.ReadAll(dec)
+	if readErr != nil {
+		return nil, saprobe.PCMFormat{}, fmt.Errorf("decoding aac: %w", readErr)
+	}
+
+	return pcm, dec.Format(), nil
 }
