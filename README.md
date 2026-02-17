@@ -6,18 +6,21 @@
 
 ## Purpose
 
-Saprobe provides a highly optimized, pure golang library and cli that supports decoding FLAC, ALAC, DSD, MP3, WAV, and OggVorbis.
+Saprobe provides an optimized, pure golang library and cli that supports decoding FLAC, ALAC, DSD, MP3, WAV, and OggVorbis.
+
+Individual decoders live in their own repository (eg: saprobe-CODEC).
 
 New implementations:
 - ALAC is a from scratch port of the Apple library to Go (with some help from github.com/abema/go-mp4
 for container parsing)
 - MP3 (originally inspired by github.com/hajimehoshi/go-mp3 (Apache))
-- DSD/DFF/DSF
+- DSD/DFF/DSF, experimental, from scratch
 
 Provided by third-party libraries:
 - FLAC (github.com/mewkiz/flac (Unlicense)), with additional optimizations (2x faster) and a couple of additional patches on our fork
 - OggVorbis: github.com/jfreymuth/oggvorbis (MIT)
-- AAC is optionally supported on macOS, but requires CGO if enabled, and just wraps macOS CoreAudio
+
+AAC is optionally supported on macOS through CoreAudio, but requires CGO if enabled, and just wraps macOS CoreAudio
 
 Future roadmap includes Opus.
 
@@ -75,7 +78,7 @@ Our fork additionally provides:
 - 32 bits support
 - optimizations for the decoder (about 2x faster than upstream)
 
-For performance measurements, detailed format support and comparison with other tools, see [FLAC](docs/FLAC.md).
+For performance measurements, detailed format support and comparison with other tools, see [FLAC](../saprobe-flac/docs/FLAC.md).
 
 ### P0: ALAC
 

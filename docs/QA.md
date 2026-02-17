@@ -1,63 +1,62 @@
-# QA
+# Testing
 
-## Methodology
+Codec-specific conformance tests and benchmarks have moved to their individual repositories:
 
-Uncompress with ffmpeg.
+- **ALAC:** [saprobe-alac/docs/QA.md](https://github.com/mycophonic/saprobe-alac/blob/main/docs/QA.md)
+- **DSD:** [saprobe-dsd/docs/QA.md](https://github.com/mycophonic/saprobe-dsd/blob/main/docs/QA.md)
+- **FLAC:** [saprobe-flac/docs/QA.md](https://github.com/mycophonic/saprobe-flac/blob/main/docs/QA.md)
+- **MP3:** [saprobe-mp3/docs/QA.md](https://github.com/mycophonic/saprobe-mp3/blob/main/docs/QA.md)
 
-Uncompress with saprobe.
+The tests below are cross-codec or format-level tests that remain in the main saprobe repo.
 
-Compare bit for bit match. Pass or fail.
+## Single file decode (`TestSingleDecode`)
 
-## Small run
-
-### FLAC
-
-```bash
-go test -v -timeout 24h ./tests/ -run TestMassDecode -only flac -audio-path  /Volumes/Anisotope/gill 1>./_/masstest-flac.log  2>&1
-```
-
-```
-    mass_decode_test.go:49: --- summary: 467 files ---
-    mass_decode_test.go:49:   by codec: flac=467
-    mass_decode_test.go:49:   by sample rate: 44100=467
-    mass_decode_test.go:49:   by channels: 2=467
-    mass_decode_test.go:49:   by bit depth: 16=467
-
-PASS
-ok      github.com/farcloser/saprobe/tests      707.436s
-```
-
-### ALAC/AAC
+Detailed comparison of a single file between saprobe and ffmpeg. Supports all codecs (ALAC, FLAC, MP3, OggVorbis, AAC).
 
 ```bash
-go test -v -timeout 24h ./tests/ -run TestMassDecode -only m4a -audio-path  /Volumes/Anisotope/gill 1>./_/masstest-mp4.log  2>&1
+go test ./tests/ -run TestSingleDecode -single-file /path/to/file.m4a -count=1 -v
 ```
 
+## Mass decode (`TestMassDecode`)
 
-```
-    mass_decode_test.go:51: --- summary: 7434 files ---
-    mass_decode_test.go:51:   by codec: aac=105, alac=7329
-    mass_decode_test.go:51:   by sample rate: 44100=7399, 48000=21, 96000=14
-    mass_decode_test.go:51:   by channels: 1=2, 2=7432
-    mass_decode_test.go:51:   by bit depth / bit rate: 16=7307, 24=22, N/A=105
+Comparative decoding across a large file collection. Walks a directory tree, decodes each file with both saprobe and ffmpeg, and compares output.
 
-FAIL
-FAIL    github.com/mycophonic/saprobe/tests     12764.331s
-FAIL
-```
+```bash
+# All codecs
+go test -v -timeout 24h ./tests/ -run TestMassDecode -audio-path /path/to/music
 
-1 AAC failure:
-
-```
-  - /Volumes/Anisotope/gill/old.lossless/Bailey, Derek & Ruins/1995-07-18 - Saisoro/[1995-07-18-CD-Tzadik-TZ 7205]/01-07 Yaginbo.m4a                                                                 
-  - Error: aac: CoreAudio error (OSStatus 1650549857) — FourCC bada ("bad audio data")                                                                                                               
-  - Root cause: Corrupt M4A container from 2005 with timescale not set. ffmpeg tolerates it, CoreAudio rejects it.
+# Single codec
+go test -v -timeout 24h ./tests/ -run TestMassDecode -only flac -audio-path /path/to/music
+go test -v -timeout 24h ./tests/ -run TestMassDecode -only m4a -audio-path /path/to/music
 ```
 
-## OggVorbis
+### Results (Anisotope collection)
 
-Success on... 14 files.
+**FLAC** (467 files, 44.1kHz/16bit stereo):
+```
+PASS — 467/467
+```
 
-Do you folks have ogg files?
+**ALAC/AAC** (7434 files):
+```
+by codec: aac=105, alac=7329
+by sample rate: 44100=7399, 48000=21, 96000=14
+by channels: 1=2, 2=7432
+by bit depth / bit rate: 16=7307, 24=22, N/A=105
 
-Please run: `go test -v -timeout 24h ./tests/ -run TestMassDecode -only m4a -audio-path MEDIA_DIRECTORY`.
+1 AAC failure: corrupt M4A container (Tzadik TZ 7205, timescale not set).
+ffmpeg tolerates it, CoreAudio rejects it.
+```
+
+**OggVorbis** (14 files):
+```
+PASS — 14/14
+```
+
+## WAV round-trip (`TestWAVRoundTrip`)
+
+Validates WAV encoding by round-tripping through ffmpeg: generate PCM, wav.Encode, ffmpeg decode, compare against original PCM. Tests simple WAVEFORMAT (mono/stereo 16-bit) and WAVEFORMATEXTENSIBLE (multichannel, 24/32-bit) headers.
+
+```bash
+go test ./tests/ -run TestWAVRoundTrip -count=1 -v
+```
