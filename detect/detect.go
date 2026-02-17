@@ -1,7 +1,24 @@
+/*
+   Copyright Mycophonic.
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
 package detect
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 )
@@ -24,6 +41,12 @@ const (
 	WAV
 	// AAC is Advanced Audio Coding (inside an M4A/MP4 container).
 	AAC
+	// DSF is a DSD Stream File container.
+	DSF
+	// DFF is a DSDIFF (DSD Interchange File Format) container.
+	DFF
+	// AIFF is Audio Interchange File Format (Apple/SGI uncompressed PCM).
+	AIFF
 )
 
 // String returns the human-readable name of the codec.
@@ -43,6 +66,12 @@ func (c Codec) String() string {
 		return "WAV"
 	case AAC:
 		return "AAC"
+	case DSF:
+		return "DSF"
+	case DFF:
+		return "DFF"
+	case AIFF:
+		return "AIFF"
 	}
 
 	return "unknown"
@@ -53,9 +82,12 @@ func (c Codec) String() string {
 // M4A:  4 bytes at offset 4 ("ftyp" in an M4A/MP4 container) — then deep probe for ALAC vs AAC.
 // MP3:  3 bytes at offset 0 ("ID3") or 2-byte MPEG sync word (0xFF 0xE0 mask).
 // OGG:  4 bytes at offset 0 ("OggS").
-// WAV:  "RIFF" at offset 0 and "WAVE" at offset 8 (12 bytes total).
+// WAV:  "RIFF" at offset 0 and "WAVE" at offset 8.
+// DSF:  "DSD " at offset 0.
+// DFF:  "FRM8" at offset 0 and "DSD " at offset 12 (16 bytes total).
+// AIFF: "FORM" at offset 0 and "AIFF" or "AIFC" at offset 8.
 const (
-	headerSize = 12
+	headerSize = 16
 
 	// mpegSyncByte is the first byte of an MPEG audio frame sync word.
 	mpegSyncByte = 0xFF
@@ -64,7 +96,21 @@ const (
 
 	// mp4BoxHeaderSize is the size of a standard MP4 box header (size + type).
 	mp4BoxHeaderSize = 8
+
+	// Container magic strings used in format detection.
+	magicDSD  = "DSD "
+	magicAIFF = "AIFF"
+	magicAIFC = "AIFC"
+
+	// id3v2 synchsafe integer bit widths (4 × 7-bit groups in bytes 6-9).
+	id3v2Shift3 = 21
+	id3v2Shift2 = 14
+	id3v2Shift1 = 7
 )
+
+// errUnrecognizedSignature is returned when the audio data after an ID3v2 tag
+// does not match any supported codec signature.
+var errUnrecognizedSignature = errors.New("unrecognized signature after ID3v2")
 
 // Identify reads the header from rs and returns the detected audio codec.
 // The reader position is reset to the start before returning.
@@ -94,13 +140,39 @@ func Identify(reader io.ReadSeeker) (Codec, error) {
 		return Vorbis, nil
 	}
 
+	// DSF: first four bytes are "DSD " (DSD Stream File).
+	if string(header[:4]) == magicDSD {
+		return DSF, nil
+	}
+
+	// DFF/DSDIFF: "FRM8" at offset 0 with form type "DSD " at offset 12.
+	if string(header[:4]) == "FRM8" && string(header[12:16]) == magicDSD {
+		return DFF, nil
+	}
+
+	// AIFF/AIFF-C: IFF container with "FORM" at offset 0 and "AIFF" or "AIFC" at offset 8.
+	if string(header[:4]) == "FORM" {
+		formType := string(header[8:12])
+		if formType == magicAIFF || formType == magicAIFC {
+			return AIFF, nil
+		}
+	}
+
 	// M4A/MP4 container: bytes 4-7 are "ftyp". Probe deeper to distinguish ALAC from AAC.
 	if string(header[4:8]) == "ftyp" {
 		return probeM4ACodec(reader)
 	}
 
-	// MP3: ID3v2 tag header starts with "ID3".
+	// ID3v2 tag: skip it and check the actual audio data underneath.
+	// FLAC files occasionally have prepended ID3v2 tags; defaulting to MP3
+	// without probing past the tag misidentifies them.
 	if string(header[:3]) == "ID3" {
+		codec, err := probeAfterID3v2(reader, header)
+		if err == nil {
+			return codec, nil
+		}
+
+		// Could not probe past the ID3v2 tag — assume MP3 (most common case).
 		return MP3, nil
 	}
 
@@ -123,13 +195,13 @@ func probeM4ACodec(reader io.ReadSeeker) (Codec, error) {
 	}()
 
 	// Walk top-level boxes to find "moov".
-	moovOffset, moovSize, err := findBox(reader, 0, -1, "moov")
-	if err != nil || moovSize == 0 {
+	moov, err := findBox(reader, 0, -1, "moov")
+	if err != nil || moov.contentSize == 0 {
 		return ALAC, nil // fallback: assume ALAC if we can't probe
 	}
 
 	// moov → trak → mdia → minf → stbl → stsd
-	codec, found := probeM4ATraks(reader, moovOffset, moovSize)
+	codec, found := probeM4ATraks(reader, moov.contentOffset, moov.contentSize)
 	if found {
 		return codec, nil
 	}
@@ -143,19 +215,19 @@ func probeM4ATraks(reader io.ReadSeeker, moovOffset, moovSize int64) (Codec, boo
 	pos := moovOffset
 
 	for pos < end {
-		contentOffset, totalSize, boxType, err := readBoxHeader(reader, pos)
-		if err != nil || totalSize == 0 {
+		boxHeader, err := readBoxHeader(reader, pos)
+		if err != nil || boxHeader.totalSize == 0 {
 			break
 		}
 
-		if boxType == "trak" {
-			contentSize := totalSize - mp4BoxHeaderSize
-			if codec, ok := probeM4ATrak(reader, contentOffset, contentSize); ok {
+		if boxHeader.boxType == "trak" {
+			contentSize := boxHeader.totalSize - mp4BoxHeaderSize
+			if codec, matched := probeM4ATrak(reader, boxHeader.contentOffset, contentSize); matched {
 				return codec, true
 			}
 		}
 
-		pos += totalSize
+		pos += boxHeader.totalSize
 	}
 
 	return Unknown, false
@@ -164,30 +236,30 @@ func probeM4ATraks(reader io.ReadSeeker, moovOffset, moovSize int64) (Codec, boo
 // probeM4ATrak probes a single trak box for an audio sample entry.
 func probeM4ATrak(reader io.ReadSeeker, trakOffset, trakSize int64) (Codec, bool) {
 	// trak → mdia
-	mdiaOff, mdiaSize, err := findBox(reader, trakOffset, trakSize, "mdia")
-	if err != nil || mdiaSize == 0 {
+	mdia, err := findBox(reader, trakOffset, trakSize, "mdia")
+	if err != nil || mdia.contentSize == 0 {
 		return Unknown, false
 	}
 
 	// mdia → minf
-	minfOff, minfSize, err := findBox(reader, mdiaOff, mdiaSize, "minf")
-	if err != nil || minfSize == 0 {
+	minf, err := findBox(reader, mdia.contentOffset, mdia.contentSize, "minf")
+	if err != nil || minf.contentSize == 0 {
 		return Unknown, false
 	}
 
 	// minf → stbl
-	stblOff, stblSize, err := findBox(reader, minfOff, minfSize, "stbl")
-	if err != nil || stblSize == 0 {
+	stbl, err := findBox(reader, minf.contentOffset, minf.contentSize, "stbl")
+	if err != nil || stbl.contentSize == 0 {
 		return Unknown, false
 	}
 
 	// stbl → stsd
-	stsdOff, stsdSize, err := findBox(reader, stblOff, stblSize, "stsd")
-	if err != nil || stsdSize == 0 {
+	stsd, err := findBox(reader, stbl.contentOffset, stbl.contentSize, "stsd")
+	if err != nil || stsd.contentSize == 0 {
 		return Unknown, false
 	}
 
-	return probeStsd(reader, stsdOff, stsdSize)
+	return probeStsd(reader, stsd.contentOffset, stsd.contentSize)
 }
 
 // probeStsd reads the stsd box payload and returns the codec from the first sample entry FourCC.
@@ -223,58 +295,143 @@ func probeStsd(reader io.ReadSeeker, contentOffset, contentSize int64) (Codec, b
 	}
 }
 
+// mp4BoxResult holds the result of a box search.
+type mp4BoxResult struct {
+	contentOffset int64
+	contentSize   int64
+}
+
+// maxScanOffset is the upper bound when scanning top-level boxes without a known parent size.
+const maxScanOffset = 1<<62 - 1
+
 // findBox searches for a box with the given type among direct children
 // starting at parentContentOffset within parentSize bytes.
 // Returns the content offset (past the box header) and content size of the found box.
-func findBox(reader io.ReadSeeker, parentContentOffset, parentSize int64, target string) (int64, int64, error) {
+func findBox(reader io.ReadSeeker, parentContentOffset, parentSize int64, target string) (mp4BoxResult, error) {
 	end := parentContentOffset + parentSize
 	if parentSize < 0 {
 		// Scan until read failure (used for top-level).
-		end = 1<<62 - 1
+		end = maxScanOffset
 	}
 
 	pos := parentContentOffset
 
 	for pos < end {
-		offset, size, boxType, err := readBoxHeader(reader, pos)
-		if err != nil || size == 0 {
-			return 0, 0, err
+		boxHeader, err := readBoxHeader(reader, pos)
+		if err != nil || boxHeader.totalSize == 0 {
+			return mp4BoxResult{}, err
 		}
 
-		if boxType == target {
-			contentSize := size - mp4BoxHeaderSize
-
-			return offset, contentSize, nil
+		if boxHeader.boxType == target {
+			return mp4BoxResult{
+				contentOffset: boxHeader.contentOffset,
+				contentSize:   boxHeader.totalSize - mp4BoxHeaderSize,
+			}, nil
 		}
 
-		pos = offset - mp4BoxHeaderSize + size
+		pos = boxHeader.contentOffset - mp4BoxHeaderSize + boxHeader.totalSize
 	}
 
-	return 0, 0, nil
+	return mp4BoxResult{}, nil
+}
+
+// mp4BoxHeader holds a parsed MP4 box header.
+type mp4BoxHeader struct {
+	contentOffset int64
+	totalSize     int64
+	boxType       string
 }
 
 // readBoxHeader reads an MP4 box header at the given position.
-// Returns content offset (past header), total box size, box type, and any error.
-func readBoxHeader(reader io.ReadSeeker, pos int64) (contentOffset, totalSize int64, boxType string, err error) {
-	if _, err = reader.Seek(pos, io.SeekStart); err != nil {
-		return 0, 0, "", err
+func readBoxHeader(reader io.ReadSeeker, pos int64) (mp4BoxHeader, error) {
+	if _, err := reader.Seek(pos, io.SeekStart); err != nil {
+		return mp4BoxHeader{}, fmt.Errorf("seeking to box at %d: %w", pos, err)
 	}
 
 	var header [mp4BoxHeaderSize]byte
-	if _, err = io.ReadFull(reader, header[:]); err != nil {
-		return 0, 0, "", err
+	if _, err := io.ReadFull(reader, header[:]); err != nil {
+		return mp4BoxHeader{}, fmt.Errorf("reading box header: %w", err)
 	}
 
 	size := int64(binary.BigEndian.Uint32(header[0:4]))
-	boxType = string(header[4:8])
+	boxType := string(header[4:8])
 
 	if size == 0 {
 		// Size 0 means "box extends to end of file" — we can't handle that for scanning.
-		return 0, 0, boxType, nil
+		return mp4BoxHeader{boxType: boxType}, nil
 	}
 
 	// size == 1 means 64-bit extended size follows, but that's rare for these boxes.
 	// Skip it for detection purposes.
 
-	return pos + mp4BoxHeaderSize, size, boxType, nil
+	return mp4BoxHeader{
+		contentOffset: pos + mp4BoxHeaderSize,
+		totalSize:     size,
+		boxType:       boxType,
+	}, nil
+}
+
+// id3v2HeaderSize is the fixed size of the ID3v2 header (before the tag body).
+const id3v2HeaderSize = 10
+
+// probeAfterID3v2 skips past a prepended ID3v2 tag and identifies the codec
+// from the actual audio data signature. The reader is always reset to position 0
+// before returning (success or failure).
+//
+// ID3v2 layout: "ID3" (3) + version (2) + flags (1) + size (4 synchsafe bytes).
+// The size field encodes the tag body length (excluding the 10-byte header).
+func probeAfterID3v2(reader io.ReadSeeker, header [headerSize]byte) (Codec, error) {
+	defer func() {
+		_, _ = reader.Seek(0, io.SeekStart)
+	}()
+
+	// Parse synchsafe integer (4 × 7-bit groups) from bytes 6-9.
+	tagSize := int64(header[6])<<id3v2Shift3 | int64(header[7])<<id3v2Shift2 |
+		int64(header[8])<<id3v2Shift1 | int64(header[9])
+
+	audioStart := id3v2HeaderSize + tagSize
+
+	// Seek to the start of actual audio data.
+	if _, err := reader.Seek(audioStart, io.SeekStart); err != nil {
+		return Unknown, fmt.Errorf("seeking past ID3v2: %w", err)
+	}
+
+	var sig [4]byte
+	if _, err := io.ReadFull(reader, sig[:]); err != nil {
+		return Unknown, fmt.Errorf("reading post-ID3v2 signature: %w", err)
+	}
+
+	// Check all supported codec signatures against the post-ID3v2 data.
+	// ID3v2 tags are most common on MP3, but can appear on FLAC, AAC/ADTS,
+	// WAV, and others.
+	switch {
+	case string(sig[:]) == "fLaC":
+		return FLAC, nil
+	case string(sig[:]) == "OggS":
+		return Vorbis, nil
+	case string(sig[:]) == "RIFF":
+		// Need 12 bytes to confirm WAVE — read 8 more.
+		var rest [8]byte
+		if _, err := io.ReadFull(reader, rest[:]); err == nil && string(rest[4:8]) == "WAVE" {
+			return WAV, nil
+		}
+	case string(sig[:]) == magicDSD:
+		return DSF, nil
+	case string(sig[:]) == "FORM":
+		// AIFF/AIFF-C: need 8 more bytes to read the form type at offset 8.
+		var rest [8]byte
+		if _, err := io.ReadFull(reader, rest[:]); err == nil {
+			formType := string(rest[4:8])
+			if formType == magicAIFF || formType == magicAIFC {
+				return AIFF, nil
+			}
+		}
+	//nolint:gosec // sig is a fixed [4]byte array.
+	case sig[0] == mpegSyncByte && sig[1]&mpegSyncMask == mpegSyncMask:
+		return MP3, nil
+	default:
+	}
+
+	// Unrecognized — fall back to caller's default (MP3).
+	return Unknown, fmt.Errorf("%w: %x", errUnrecognizedSignature, sig)
 }

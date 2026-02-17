@@ -1,3 +1,19 @@
+/*
+   Copyright Mycophonic.
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
 package tests_test
 
 import (
@@ -5,20 +21,22 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
+	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/mycophonic/agar/pkg/agar"
+	alac "github.com/mycophonic/saprobe-alac"
+	flac "github.com/mycophonic/saprobe-flac"
+	mp3 "github.com/mycophonic/saprobe-mp3"
 
 	"github.com/mycophonic/saprobe"
-	"github.com/mycophonic/saprobe/alac"
+	"github.com/mycophonic/saprobe/aiff"
 	"github.com/mycophonic/saprobe/detect"
-	"github.com/mycophonic/saprobe/flac"
-	"github.com/mycophonic/saprobe/mp3"
 	"github.com/mycophonic/saprobe/vorbis"
+	"github.com/mycophonic/saprobe/wav"
 )
 
 //nolint:gochecknoglobals
@@ -54,14 +72,15 @@ func TestSingleDecode(t *testing.T) {
 	t.Logf("Total Samples: %d (per channel)", props.totalSamples)
 
 	// Step 2: Determine PCM format
-	pcmFormat := pcmFormatFromDepth(props.bitDepth, filepath.Ext(path))
+	decodeBitDepth := decodeBitDepthForFile(props.bitDepth, filepath.Ext(path))
+	pcmFormat := agar.RawPCMFormat(decodeBitDepth)
 	bytesPerSample := bytesPerSampleFromFormat(pcmFormat)
 	t.Logf("PCM Format:  %s (%d bytes/sample)", pcmFormat, bytesPerSample)
 
 	// Step 3: Decode with ffmpeg
 	t.Log("")
 	t.Log("=== DECODING WITH FFMPEG ===")
-	ffmpegPCM := decodeWithFFmpeg(t, path, pcmFormat)
+	ffmpegPCM := agar.FFmpegDecode(t, agar.FFmpegDecodeOptions{Src: path, BitDepth: decodeBitDepth})
 	t.Logf("FFmpeg output: %d bytes", len(ffmpegPCM))
 
 	// Step 4: Decode with saprobe
@@ -134,21 +153,15 @@ func probeFileProperties(t *testing.T, path string) fileProperties {
 	}
 }
 
-func pcmFormatFromDepth(bitDepth int, ext string) string {
-	// Lossy codecs always decode to 16-bit
+// decodeBitDepthForFile returns the output bit depth for ffmpeg decoding.
+// Lossy codecs always decode to 16-bit; lossless uses the source bit depth.
+func decodeBitDepthForFile(bitDepth int, ext string) int {
 	ext = strings.ToLower(ext)
 	if ext == ".mp3" || ext == ".ogg" {
-		return "s16le"
+		return 16
 	}
 
-	switch bitDepth {
-	case 32:
-		return "s32le"
-	case 20, 24:
-		return "s24le"
-	default:
-		return "s16le"
-	}
+	return bitDepth
 }
 
 func bytesPerSampleFromFormat(pcmFormat string) int {
@@ -160,30 +173,6 @@ func bytesPerSampleFromFormat(pcmFormat string) int {
 	default:
 		return 2
 	}
-}
-
-func decodeWithFFmpeg(t *testing.T, path, pcmFormat string) []byte {
-	t.Helper()
-
-	ffmpegBin, err := agar.LookFor("ffmpeg")
-	if err != nil {
-		t.Fatalf("ffmpeg not found: %v", err)
-	}
-
-	cmd := exec.Command(ffmpegBin,
-		"-i", path,
-		"-f", pcmFormat,
-		"-v", "quiet",
-		"-y",
-		"pipe:1",
-	)
-
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("ffmpeg decode failed: %v", err)
-	}
-
-	return out
 }
 
 func decodeWithSaprobe(t *testing.T, path string) ([]byte, saprobe.PCMFormat, error) {
@@ -204,14 +193,97 @@ func decodeWithSaprobe(t *testing.T, path string) ([]byte, saprobe.PCMFormat, er
 
 	switch codec { //revive:disable-line:identical-switch-branches
 	case detect.FLAC:
-		return flac.Decode(file)
+		dec, flacErr := flac.NewDecoder(file)
+		if flacErr != nil {
+			return nil, saprobe.PCMFormat{}, flacErr
+		}
+		defer dec.Close()
+
+		pcm, readErr := io.ReadAll(dec)
+		if readErr != nil {
+			return nil, saprobe.PCMFormat{}, readErr
+		}
+
+		ff := dec.Format()
+
+		return pcm, saprobe.PCMFormat{
+			SampleRate: ff.SampleRate,
+			BitDepth:   saprobe.BitDepth(ff.BitDepth),
+			Channels:   ff.Channels,
+		}, nil
 	case detect.MP3:
-		return mp3.Decode(file)
+		dec, mp3Err := mp3.NewDecoder(file)
+		if mp3Err != nil {
+			return nil, saprobe.PCMFormat{}, mp3Err
+		}
+
+		pcm, readErr := io.ReadAll(dec)
+		if readErr != nil {
+			return nil, saprobe.PCMFormat{}, readErr
+		}
+
+		mf := dec.Format()
+
+		return pcm, saprobe.PCMFormat{
+			SampleRate: mf.SampleRate,
+			BitDepth:   saprobe.BitDepth(mf.BitDepth),
+			Channels:   uint(mf.Channels),
+		}, nil
 	case detect.Vorbis:
-		return vorbis.Decode(file)
+		dec, vorbisErr := vorbis.NewDecoder(file)
+		if vorbisErr != nil {
+			return nil, saprobe.PCMFormat{}, vorbisErr
+		}
+
+		pcm, readErr := io.ReadAll(dec)
+		if readErr != nil {
+			return nil, saprobe.PCMFormat{}, readErr
+		}
+
+		return pcm, dec.Format(), nil
 	case detect.ALAC:
-		return alac.Decode(file)
-	case detect.WAV, detect.AAC, detect.DSF, detect.DFF:
+		dec, alacErr := alac.NewDecoder(file)
+		if alacErr != nil {
+			return nil, saprobe.PCMFormat{}, alacErr
+		}
+
+		pcm, readErr := io.ReadAll(dec)
+		if readErr != nil {
+			return nil, saprobe.PCMFormat{}, readErr
+		}
+
+		af := dec.Format()
+
+		return pcm, saprobe.PCMFormat{
+			SampleRate: af.SampleRate,
+			BitDepth:   saprobe.BitDepth(af.BitDepth),
+			Channels:   uint(af.Channels),
+		}, nil
+	case detect.WAV:
+		dec, wavErr := wav.NewDecoder(file)
+		if wavErr != nil {
+			return nil, saprobe.PCMFormat{}, wavErr
+		}
+
+		pcm, readErr := io.ReadAll(dec)
+		if readErr != nil {
+			return nil, saprobe.PCMFormat{}, readErr
+		}
+
+		return pcm, dec.Format(), nil
+	case detect.AIFF:
+		dec, aiffErr := aiff.NewDecoder(file)
+		if aiffErr != nil {
+			return nil, saprobe.PCMFormat{}, aiffErr
+		}
+
+		pcm, readErr := io.ReadAll(dec)
+		if readErr != nil {
+			return nil, saprobe.PCMFormat{}, readErr
+		}
+
+		return pcm, dec.Format(), nil
+	case detect.AAC, detect.DSF, detect.DFF:
 		return nil, saprobe.PCMFormat{}, fmt.Errorf("unsupported codec: %s", codec)
 	case detect.Unknown:
 		return nil, saprobe.PCMFormat{}, fmt.Errorf("unsupported codec: %s", codec)

@@ -124,8 +124,6 @@ linters:
     # MAYBE disable revive file-header
 
   disable:
-    # Until we upstream patches on flac
-    - gomoddirectives
     # These are the linters that we know we do not want
     - copyloopvar       # no longer needed after go 1.22
     - errchkjson        # forces handling of json err (eg: prevents _), which is too much
@@ -159,6 +157,7 @@ linters:
 
   exclusions:
     rules:
+      # gosec is not delivering value on tests, regularly flagging cmd.Exec calls
       - path: testutil/
         linters:
           - gosec
@@ -267,6 +266,7 @@ linters:
             - $gostd
             - github.com/mycophonic/saprobe
             - github.com/mycophonic/saprobe/aac
+            - github.com/mycophonic/saprobe/aiff
             - github.com/mycophonic/saprobe/detect
             - github.com/mycophonic/saprobe/vorbis
             - github.com/mycophonic/saprobe/wav

@@ -1,3 +1,19 @@
+/*
+   Copyright Mycophonic.
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
 package tests_test
 
 import (
@@ -7,11 +23,13 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/containerd/nerdctl/mod/tigron/expect"
 	"github.com/containerd/nerdctl/mod/tigron/test"
@@ -22,14 +40,64 @@ import (
 	"github.com/mycophonic/saprobe/tests/testutils"
 )
 
+// maxDiffPerSample is the per-sample tolerance for lossy codec comparison.
+// Different decoders have floating-point rounding differences in synthesis filterbanks.
+const maxDiffPerSample = 2
+
+// mp3DecoderDelay is the synthesis filterbank priming delay in samples.
+// Decoders with gapless support trim this; others include it as leading silence.
+const mp3DecoderDelay = 529
+
+// massDecodeTimeout is the per-command execution timeout for the mass decode test.
+// The tigron default (3m) is too short for large hi-res files (e.g. 500MB+ 24-bit/192kHz).
+const massDecodeTimeout = 30 * time.Minute
+
 //nolint:gochecknoglobals
 var (
 	audioPath = flag.String("audio-path", "", "directory of audio files for mass decode comparison")
 	only      = flag.String("only", "", "filter by file extension (e.g. flac, mp3, ogg, m4a)")
 )
 
+// decoderID identifies a decoder in the comparison matrix.
+type decoderID int
+
+const (
+	decSaprobe decoderID = iota
+	decFFmpeg
+	decLame
+	decMpg123
+)
+
+var decoderNames = [...]string{"sp", "ff", "lm", "mp"} //nolint:gochecknoglobals
+
+func (d decoderID) String() string { return decoderNames[d] }
+
+// decoderBins holds resolved binary paths for optional decoders.
+type decoderBins struct {
+	lame   string // empty if unavailable
+	mpg123 string // empty if unavailable
+}
+
+// decOutput holds the loaded PCM data for one decoder.
+type decOutput struct {
+	id   decoderID
+	data []byte
+}
+
+// pairResult holds the comparison outcome between two decoder outputs.
+type pairResult struct {
+	a, b           decoderID
+	match          bool
+	aligned        int // 0 or ±529
+	maxDiff        int16
+	largeDiffs     int
+	lengthMismatch bool
+}
+
 // TestMassDecode walks a directory of audio files, decodes each with saprobe
-// and ffmpeg, and compares the raw PCM output byte-for-byte.
+// and reference decoders, and compares the raw PCM output.
+// For MP3 files, four decoders are used (saprobe, ffmpeg, lame, mpg123) and
+// failures are classified as FAIL (saprobe wrong) or HARD CASE (references disagree).
 //
 // Run: go test ./tests/ -run TestMassDecode -audio-path /path/to/audio/files.
 func TestMassDecode(t *testing.T) {
@@ -49,6 +117,23 @@ func TestMassDecode(t *testing.T) {
 	t.Logf("discovered %d audio files in %s", len(files), root)
 	logDiscoverySummary(t, files)
 
+	// Resolve optional decoder binaries once.
+	var bins decoderBins
+
+	if path, err := agar.LookFor("lame"); err == nil {
+		bins.lame = path
+		t.Logf("lame: %s", path)
+	} else {
+		t.Log("lame not found — MP3 tests will not include lame reference")
+	}
+
+	if path, err := agar.LookFor("mpg123"); err == nil {
+		bins.mpg123 = path
+		t.Logf("mpg123: %s", path)
+	} else {
+		t.Log("mpg123 not found — MP3 tests will not include mpg123 reference")
+	}
+
 	testCase := testutils.Setup()
 	testCase.Description = "mass decode comparison"
 	// Parallelism will screw the pooch.
@@ -56,13 +141,13 @@ func TestMassDecode(t *testing.T) {
 
 	for i, af := range files {
 		t.Logf("[%d/%d] queuing %s (%s)", i+1, len(files), af.relPath, af.pcmFormat)
-		testCase.SubTests = append(testCase.SubTests, makeDecodeTest(af, i+1, len(files)))
+		testCase.SubTests = append(testCase.SubTests, makeDecodeTest(af, i+1, len(files), bins))
 	}
 
 	testCase.Run(t)
 }
 
-func makeDecodeTest(af audioFile, index, total int) *test.Case {
+func makeDecodeTest(af audioFile, index, total int, bins decoderBins) *test.Case {
 	prefix := fmt.Sprintf("[%d/%d]", index, total)
 
 	return &test.Case{
@@ -78,32 +163,439 @@ func makeDecodeTest(af audioFile, index, total int) *test.Case {
 				helpers.T().FailNow()
 			}
 
-			refOut := data.Temp().Path("ref.raw")
-			helpers.Custom(ffmpegBin,
+			refOut := data.Temp().Path("ff.raw")
+
+			ffCmd := helpers.Custom(ffmpegBin,
 				"-i", af.path,
 				"-f", af.pcmFormat,
 				"-y", refOut,
-			).Run(&test.Expected{ExitCode: expect.ExitCodeSuccess})
+			)
+			ffCmd.WithTimeout(massDecodeTimeout)
+			ffCmd.Run(&test.Expected{ExitCode: expect.ExitCodeSuccess})
 
 			info, _ := os.Stat(refOut)
 			if info != nil {
-				helpers.T().Log(fmt.Sprintf("%s ffmpeg reference: %d bytes", prefix, info.Size()))
+				helpers.T().Log(fmt.Sprintf("%s ffmpeg: %d bytes", prefix, info.Size()))
+			}
+
+			// For MP3, also decode with lame and mpg123 if available.
+			if af.codec == "mp3" {
+				if bins.lame != "" {
+					lameOut := data.Temp().Path("lm.raw")
+					if err := runLameDecode(bins.lame, af.path, lameOut); err != nil {
+						helpers.T().Log(fmt.Sprintf("%s lame decode error: %v", prefix, err))
+					} else if info, _ := os.Stat(lameOut); info != nil {
+						helpers.T().Log(fmt.Sprintf("%s lame: %d bytes", prefix, info.Size()))
+					}
+				}
+
+				if bins.mpg123 != "" {
+					mpg123Out := data.Temp().Path("mp.raw")
+					if err := runMpg123Decode(bins.mpg123, af.path, mpg123Out); err != nil {
+						helpers.T().Log(fmt.Sprintf("%s mpg123 decode error: %v", prefix, err))
+					} else if info, _ := os.Stat(mpg123Out); info != nil {
+						helpers.T().Log(fmt.Sprintf("%s mpg123: %d bytes", prefix, info.Size()))
+					}
+				}
 			}
 		},
 		Command: func(data test.Data, helpers test.Helpers) test.TestableCommand {
 			helpers.T().Log(fmt.Sprintf("%s decoding with saprobe: %s", prefix, af.path))
 
-			saprobeOut := data.Temp().Path("saprobe.raw")
+			saprobeOut := data.Temp().Path("sp.raw")
 
-			return helpers.Command("decode", "--raw", "-o", saprobeOut, af.path)
+			cmd := helpers.Command("decode", "--raw", "-o", saprobeOut, af.path)
+			cmd.WithTimeout(massDecodeTimeout)
+
+			return cmd
 		},
 		Expected: func(data test.Data, _ test.Helpers) *test.Expected {
 			return &test.Expected{
 				ExitCode: expect.ExitCodeSuccess,
-				Output:   comparePCMFiles(data, prefix, af.codec, af.lossy),
+				Output:   buildComparator(data, prefix, af, bins),
 			}
 		},
 	}
+}
+
+// buildComparator returns the appropriate comparator for the audio file.
+// MP3 files use multi-decoder comparison; all others use the legacy 2-decoder path.
+func buildComparator(data test.Data, prefix string, af audioFile, bins decoderBins) test.Comparator {
+	if af.codec != "mp3" {
+		return comparePCMFiles(data, prefix, af.codec, af.lossy, af.channels)
+	}
+
+	return compareMP3MultiDecoder(data, prefix, af, bins)
+}
+
+// compareMP3MultiDecoder returns a comparator that reads all decoder outputs,
+// performs pairwise comparison, and classifies the result.
+func compareMP3MultiDecoder(data test.Data, prefix string, af audioFile, _ decoderBins) test.Comparator {
+	return func(_ string, t tig.T) {
+		t.Helper()
+
+		nChannels, _ := strconv.Atoi(af.channels)
+		if nChannels == 0 {
+			nChannels = 2
+		}
+
+		// Load all available decoder outputs.
+		var outputs []decOutput
+
+		names := []struct {
+			id   decoderID
+			file string
+		}{
+			{decSaprobe, "sp.raw"},
+			{decFFmpeg, "ff.raw"},
+			{decLame, "lm.raw"},
+			{decMpg123, "mp.raw"},
+		}
+
+		var errors []string
+
+		for _, n := range names {
+			path := data.Temp().Path(n.file)
+
+			pcm, err := os.ReadFile(path)
+			if err != nil {
+				if n.id == decSaprobe || n.id == decFFmpeg {
+					// Required decoders — fail if missing.
+					t.Log(fmt.Sprintf("%s reading %s output: %v", prefix, n.id, err))
+					t.Fail()
+
+					return
+				}
+				// Optional decoder — note the error and continue.
+				errors = append(errors, fmt.Sprintf("%s: read error", n.id))
+
+				continue
+			}
+
+			if len(pcm) == 0 {
+				errors = append(errors, fmt.Sprintf("%s: empty output", n.id))
+
+				continue
+			}
+
+			// Mono-to-stereo duplication for lame/mpg123 on mono sources.
+			if nChannels == 1 && (n.id == decLame || n.id == decMpg123) {
+				pcm = monoToStereoS16(pcm)
+			}
+
+			outputs = append(outputs, decOutput{id: n.id, data: pcm})
+		}
+
+		// Log sizes.
+		var sizeParts []string
+		for _, o := range outputs {
+			sizeParts = append(sizeParts, fmt.Sprintf("%s=%d", o.id, len(o.data)))
+		}
+
+		t.Log(fmt.Sprintf("%s comparing: %s", prefix, strings.Join(sizeParts, " ")))
+
+		if len(errors) > 0 {
+			t.Log(fmt.Sprintf("%s decoder errors: %s", prefix, strings.Join(errors, ", ")))
+		}
+
+		// Pairwise comparison.
+		var pairs []pairResult
+
+		for i := range outputs {
+			for j := i + 1; j < len(outputs); j++ {
+				pr := comparePair(outputs[i].data, outputs[j].data, outputs[i].id, outputs[j].id, nChannels)
+				pairs = append(pairs, pr)
+			}
+		}
+
+		// Classify and log.
+		classifyMP3Result(t, prefix, outputs, pairs, errors)
+	}
+}
+
+// comparePair compares two PCM buffers with alignment detection.
+func comparePair(a, b []byte, idA, idB decoderID, channels int) pairResult {
+	pr := pairResult{a: idA, b: idB}
+
+	// Length check.
+	const maxLengthDiffBytes = 3072 * 2 * 2
+
+	lengthDiff := len(a) - len(b)
+	if lengthDiff < 0 {
+		lengthDiff = -lengthDiff
+	}
+
+	if lengthDiff > maxLengthDiffBytes {
+		pr.lengthMismatch = true
+
+		return pr
+	}
+
+	// Try direct comparison.
+	largeDiffs, maxDiff := lossySampleCompare(a, b)
+	compareLen := min(len(a), len(b))
+	numSamples := compareLen / 2
+	maxLargeDiffs := numSamples / 100
+
+	if largeDiffs <= maxLargeDiffs {
+		pr.match = true
+		pr.maxDiff = maxDiff
+		pr.largeDiffs = largeDiffs
+
+		return pr
+	}
+
+	// Try shifting b forward by decoder delay (b has extra leading samples).
+	refOffset := mp3DecoderDelay * 2 * channels
+	if refOffset < len(b) {
+		shifted, sMax := lossySampleCompare(a, b[refOffset:])
+		sLen := min(len(a), len(b)-refOffset)
+		sMaxLarge := sLen / 2 / 100
+
+		if shifted <= sMaxLarge {
+			pr.match = true
+			pr.aligned = mp3DecoderDelay
+			pr.maxDiff = sMax
+			pr.largeDiffs = shifted
+
+			return pr
+		}
+	}
+
+	// Try shifting a forward by decoder delay (a has extra leading samples).
+	if refOffset < len(a) {
+		shifted, sMax := lossySampleCompare(a[refOffset:], b)
+		sLen := min(len(a)-refOffset, len(b))
+		sMaxLarge := sLen / 2 / 100
+
+		if shifted <= sMaxLarge {
+			pr.match = true
+			pr.aligned = -mp3DecoderDelay
+			pr.maxDiff = sMax
+			pr.largeDiffs = shifted
+
+			return pr
+		}
+	}
+
+	// No alignment worked.
+	pr.maxDiff = maxDiff
+	pr.largeDiffs = largeDiffs
+
+	return pr
+}
+
+// classifyMP3Result determines MATCH, FAIL, or HARD CASE from the pairwise results.
+//
+//nolint:cyclop
+func classifyMP3Result(
+	t tig.T, prefix string,
+	outputs []decOutput,
+	pairs []pairResult,
+	decErrors []string,
+) {
+	t.Helper()
+
+	// Build quick lookup: does pair (a,b) match?
+	type pairKey struct{ a, b decoderID }
+
+	pairMap := make(map[pairKey]pairResult, len(pairs))
+	for _, pr := range pairs {
+		pairMap[pairKey{pr.a, pr.b}] = pr
+		pairMap[pairKey{pr.b, pr.a}] = pr
+	}
+
+	lookup := func(a, b decoderID) pairResult { return pairMap[pairKey{a, b}] }
+
+	// Determine which decoders are present.
+	present := make(map[decoderID]bool, len(outputs))
+	for _, o := range outputs {
+		present[o.id] = true
+	}
+
+	// Check if all pairs match.
+	allMatch := true
+
+	var globalMaxDiff int16
+
+	var globalAligned int
+
+	for _, pr := range pairs {
+		if !pr.match {
+			allMatch = false
+		}
+
+		if pr.maxDiff > globalMaxDiff {
+			globalMaxDiff = pr.maxDiff
+		}
+
+		if pr.aligned != 0 {
+			globalAligned = pr.aligned
+		}
+	}
+
+	if allMatch {
+		aligned := ""
+		if globalAligned != 0 {
+			aligned = fmt.Sprintf(", aligned %+d", globalAligned)
+		}
+
+		errNote := ""
+		if len(decErrors) > 0 {
+			errNote = fmt.Sprintf(" [%s]", strings.Join(decErrors, "; "))
+		}
+
+		t.Log(fmt.Sprintf("%s MATCH (%d decoders%s: max diff=%d)%s",
+			prefix, len(outputs), aligned, globalMaxDiff, errNote))
+
+		return
+	}
+
+	// Not all match. Determine if references agree with each other.
+	refIDs := []decoderID{decFFmpeg, decLame, decMpg123}
+
+	var presentRefs []decoderID
+
+	for _, rid := range refIDs {
+		if present[rid] {
+			presentRefs = append(presentRefs, rid)
+		}
+	}
+
+	// Check if all reference pairs agree.
+	refsAgree := true
+
+	for i := range presentRefs {
+		for j := i + 1; j < len(presentRefs); j++ {
+			pr := lookup(presentRefs[i], presentRefs[j])
+			if !pr.match {
+				refsAgree = false
+			}
+		}
+	}
+
+	// Build human-readable pair summary.
+	pairSummary := buildPairSummary(pairs)
+
+	if !refsAgree {
+		// References disagree — HARD CASE.
+		errNote := ""
+		if len(decErrors) > 0 {
+			errNote = fmt.Sprintf(" [%s]", strings.Join(decErrors, "; "))
+		}
+
+		t.Log(fmt.Sprintf("%s HARD CASE: references disagree (%s)%s", prefix, pairSummary, errNote))
+
+		return
+	}
+
+	// References agree. Does saprobe match them?
+	if present[decSaprobe] && len(presentRefs) > 0 {
+		spMatchesRef := true
+
+		for _, rid := range presentRefs {
+			pr := lookup(decSaprobe, rid)
+			if !pr.match {
+				spMatchesRef = false
+
+				break
+			}
+		}
+
+		if spMatchesRef {
+			aligned := ""
+			if globalAligned != 0 {
+				aligned = fmt.Sprintf(", aligned %+d", globalAligned)
+			}
+
+			t.Log(fmt.Sprintf("%s MATCH (%d decoders%s: max diff=%d)",
+				prefix, len(outputs), aligned, globalMaxDiff))
+
+			return
+		}
+
+		// saprobe differs from agreeing references — FAIL.
+		t.Log(fmt.Sprintf("%s FAIL: saprobe differs from references (%s)", prefix, pairSummary))
+		t.Fail()
+
+		return
+	}
+
+	// Fallback: only 2 decoders, they disagree.
+	t.Log(fmt.Sprintf("%s FAIL: decoders disagree (%s)", prefix, pairSummary))
+	t.Fail()
+}
+
+// buildPairSummary produces a compact string like "sp=ff, sp≠lm, ff≠lm".
+func buildPairSummary(pairs []pairResult) string {
+	parts := make([]string, 0, len(pairs))
+
+	for _, pr := range pairs {
+		op := "="
+
+		if !pr.match {
+			if pr.lengthMismatch {
+				op = "≠len"
+			} else {
+				op = "≠"
+			}
+		}
+
+		detail := ""
+		if pr.match && pr.aligned != 0 {
+			detail = fmt.Sprintf("(%+d)", pr.aligned)
+		}
+
+		parts = append(parts, fmt.Sprintf("%s%s%s%s", pr.a, op, pr.b, detail))
+	}
+
+	return strings.Join(parts, ", ")
+}
+
+// runLameDecode decodes an MP3 file to raw s16le PCM using lame.
+func runLameDecode(lameBin, srcPath, dstPath string) error {
+	cmd := exec.Command(lameBin, "--decode", "-t", "--quiet", srcPath, "-")
+
+	var stderr bytes.Buffer
+
+	cmd.Stderr = &stderr
+
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("lame: %w\n%s", err, stderr.String())
+	}
+
+	return os.WriteFile(dstPath, out, 0o600)
+}
+
+// runMpg123Decode decodes an MP3 file to raw s16le PCM using mpg123.
+func runMpg123Decode(mpg123Bin, srcPath, dstPath string) error {
+	cmd := exec.Command(mpg123Bin, "-e", "s16", "-s", "-q", srcPath)
+
+	var stderr bytes.Buffer
+
+	cmd.Stderr = &stderr
+
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("mpg123: %w\n%s", err, stderr.String())
+	}
+
+	return os.WriteFile(dstPath, out, 0o600)
+}
+
+// monoToStereoS16 duplicates mono 16-bit PCM to stereo by doubling each sample.
+func monoToStereoS16(mono []byte) []byte {
+	stereo := make([]byte, len(mono)*2)
+
+	for i := 0; i+1 < len(mono); i += 2 {
+		stereo[i*2] = mono[i]
+		stereo[i*2+1] = mono[i+1]
+		stereo[i*2+2] = mono[i]
+		stereo[i*2+3] = mono[i+1]
+	}
+
+	return stereo
 }
 
 type audioFile struct {
@@ -127,8 +619,13 @@ func discoverAudioFiles(t *testing.T, root string) []audioFile {
 	var files []audioFile
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
+		if err != nil {
+			// Skip directories we cannot read (e.g. macOS system metadata).
+			return filepath.SkipDir
+		}
+
+		if d.IsDir() {
+			return nil
 		}
 
 		// Filter by extension if -only is set.
@@ -225,19 +722,14 @@ func codecToPCMFormat(codec, bitsRaw string) (string, bool) {
 	}
 }
 
-// comparePCMFiles returns a comparator that reads the saprobe and ffmpeg output
-// files from the test's temp directory and compares them.
-// For lossless codecs, comparison is byte-for-byte.
-// For lossy codecs, small per-sample differences (±2) are tolerated.
-// For AAC, if the outputs are badly misaligned (missing gapless metadata),
-// the test passes with a warning instead of failing.
+// comparePCMFiles returns a comparator for non-MP3 codecs (saprobe vs ffmpeg).
 //
 //revive:disable:flag-parameter
-func comparePCMFiles(data test.Data, prefix, codec string, lossy bool) test.Comparator {
+func comparePCMFiles(data test.Data, prefix, codec string, lossy bool, channels string) test.Comparator {
 	return func(_ string, t tig.T) {
 		t.Helper()
 
-		saprobeData, err := os.ReadFile(data.Temp().Path("saprobe.raw"))
+		saprobeData, err := os.ReadFile(data.Temp().Path("sp.raw"))
 		if err != nil {
 			t.Log(prefix + " reading saprobe output: " + err.Error())
 			t.Fail()
@@ -245,7 +737,7 @@ func comparePCMFiles(data test.Data, prefix, codec string, lossy bool) test.Comp
 			return
 		}
 
-		refData, err := os.ReadFile(data.Temp().Path("ref.raw"))
+		refData, err := os.ReadFile(data.Temp().Path("ff.raw"))
 		if err != nil {
 			t.Log(prefix + " reading ffmpeg reference: " + err.Error())
 			t.Fail()
@@ -255,8 +747,13 @@ func comparePCMFiles(data test.Data, prefix, codec string, lossy bool) test.Comp
 
 		t.Log(fmt.Sprintf("%s comparing: saprobe=%d bytes, ffmpeg=%d bytes", prefix, len(saprobeData), len(refData)))
 
+		nChannels, _ := strconv.Atoi(channels)
+		if nChannels == 0 {
+			nChannels = 2
+		}
+
 		if lossy {
-			compareLossy(t, prefix, codec, saprobeData, refData)
+			compareLossy(t, prefix, codec, nChannels, saprobeData, refData)
 		} else {
 			compareLossless(t, prefix, saprobeData, refData)
 		}
@@ -278,20 +775,10 @@ func compareLossless(t tig.T, prefix string, saprobeData, refData []byte) {
 	t.Fail()
 }
 
-// compareLossy allows small per-sample differences (±2) for lossy codecs.
-// Different decoders have floating-point rounding differences in synthesis filterbanks.
-// Length differences up to a few frames are tolerated because decoders handle
-// encoder delay, priming samples, and end-of-stream padding differently.
-// MP3: 1 frame = 1152 samples; AAC: encoder delay is typically 2048 samples.
-//
-// For AAC files without gapless metadata (iTunSMPB / edts), CoreAudio and ffmpeg
-// produce temporally misaligned outputs because they disagree on priming sample
-// trimming. When this is detected, the test passes with a warning rather than failing.
-func compareLossy(t tig.T, prefix, codec string, saprobeData, refData []byte) {
+// compareLossy allows small per-sample differences (±2) for non-MP3 lossy codecs.
+func compareLossy(t tig.T, prefix, codec string, _ int, saprobeData, refData []byte) {
 	t.Helper()
 
-	// Allow length differences up to 3072 stereo 16-bit samples (12288 bytes).
-	// Covers MP3 frame padding (~1152 samples) and AAC encoder delay (~2048 samples).
 	const maxLengthDiffBytes = 3072 * 2 * 2
 
 	lengthDiff := len(saprobeData) - len(refData)
@@ -315,24 +802,41 @@ func compareLossy(t tig.T, prefix, codec string, saprobeData, refData []byte) {
 		return
 	}
 
-	if lengthDiff > 0 {
-		t.Log(fmt.Sprintf("%s length diff: saprobe=%d, ffmpeg=%d (±%d bytes, within tolerance)",
-			prefix, len(saprobeData), len(refData), lengthDiff))
-	}
-
-	// Compare the overlapping region with per-sample tolerance.
-	const maxDiffPerSample = 2
-
+	largeDiffs, maxDiff := lossySampleCompare(saprobeData, refData)
 	compareLen := min(len(saprobeData), len(refData))
 	numSamples := compareLen / 2
-	largeDiffs := 0
-	maxDiff := int16(0)
+	maxLargeDiffs := numSamples / 100
+
+	if largeDiffs <= maxLargeDiffs {
+		t.Log(fmt.Sprintf("%s MATCH (lossy: max diff=%d, large diffs=%d)", prefix, maxDiff, largeDiffs))
+
+		return
+	}
+
+	if codec == "aac" {
+		t.Log(fmt.Sprintf("%s WARNING: AAC sample misalignment (%d samples (%.2f%%) differ, max diff=%d) — "+
+			"likely missing gapless metadata, skipping comparison",
+			prefix, largeDiffs, float64(largeDiffs)/float64(numSamples)*100, maxDiff))
+
+		return
+	}
+
+	t.Log(fmt.Sprintf("%s LOSSY MISMATCH: %d samples (%.2f%%) differ by more than ±%d, max diff=%d",
+		prefix, largeDiffs, float64(largeDiffs)/float64(numSamples)*100, maxDiffPerSample, maxDiff))
+	t.Fail()
+}
+
+// lossySampleCompare counts 16-bit samples where |a-b| > maxDiffPerSample
+// across the overlapping region of two raw PCM buffers.
+func lossySampleCompare(a, b []byte) (largeDiffs int, maxDiff int16) {
+	compareLen := min(len(a), len(b))
+	numSamples := compareLen / 2
 
 	for i := range numSamples {
-		spSample := int16(binary.LittleEndian.Uint16(saprobeData[i*2:]))
-		refSample := int16(binary.LittleEndian.Uint16(refData[i*2:]))
+		sa := int16(binary.LittleEndian.Uint16(a[i*2:]))
+		sb := int16(binary.LittleEndian.Uint16(b[i*2:]))
 
-		diff := spSample - refSample
+		diff := sa - sb
 		if diff < 0 {
 			diff = -diff
 		}
@@ -346,27 +850,7 @@ func compareLossy(t tig.T, prefix, codec string, saprobeData, refData []byte) {
 		}
 	}
 
-	// Allow up to 1% of samples to have larger differences.
-	maxLargeDiffs := numSamples / 100
-	if largeDiffs > maxLargeDiffs {
-		// For AAC, massive sample mismatch indicates temporal misalignment from
-		// missing gapless metadata — not a decoding error. Warn and pass.
-		if codec == "aac" {
-			t.Log(fmt.Sprintf("%s WARNING: AAC sample misalignment (%d samples (%.2f%%) differ, max diff=%d) — "+
-				"likely missing gapless metadata, skipping comparison",
-				prefix, largeDiffs, float64(largeDiffs)/float64(numSamples)*100, maxDiff))
-
-			return
-		}
-
-		t.Log(fmt.Sprintf("%s LOSSY MISMATCH: %d samples (%.2f%%) differ by more than ±%d, max diff=%d",
-			prefix, largeDiffs, float64(largeDiffs)/float64(numSamples)*100, maxDiffPerSample, maxDiff))
-		t.Fail()
-
-		return
-	}
-
-	t.Log(fmt.Sprintf("%s MATCH (lossy: max diff=%d, large diffs=%d)", prefix, maxDiff, largeDiffs))
+	return largeDiffs, maxDiff
 }
 
 func logDiscoverySummary(t *testing.T, files []audioFile) {

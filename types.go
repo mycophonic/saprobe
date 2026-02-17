@@ -1,8 +1,25 @@
+/*
+   Copyright Mycophonic.
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
 package saprobe
 
 import (
 	"errors"
 	"fmt"
+	"io"
 )
 
 // BitDepth represents the bit depth of PCM audio samples.
@@ -43,6 +60,41 @@ type PCMFormat struct {
 	SampleRate int
 	BitDepth   BitDepth
 	Channels   uint
+	// IsFloat indicates the samples are IEEE 754 floating-point rather than
+	// signed integer. When true, BitDepth is 32 (float32) or 64 (float64).
+	IsFloat bool
+}
+
+// PCMDecoder streams decoded interleaved little-endian signed PCM.
+// Callers obtain one via each codec's NewDecoder function.
+// Format is valid immediately after construction. Read fills the caller's
+// buffer with decoded PCM bytes, returning io.EOF when the stream is exhausted.
+type PCMDecoder interface {
+	io.Reader
+	// Format returns the PCM output format (sample rate, bit depth, channels).
+	Format() PCMFormat
+}
+
+// BitOrder represents the bit ordering within each DSD octet.
+type BitOrder uint8
+
+const (
+	// MSBFirst means the most-significant bit is the earliest sample (DFF/DSDIFF convention).
+	MSBFirst BitOrder = iota
+	// LSBFirst means the least-significant bit is the earliest sample (DSF convention).
+	LSBFirst
+)
+
+// DSDFormat describes the format of raw DSD audio data extracted from a container.
+type DSDFormat struct {
+	// SampleRate is the DSD sample rate in Hz (e.g. 2822400 for DSD64).
+	SampleRate int
+	// Channels is the number of audio channels.
+	Channels uint
+	// SamplesPerChannel is the total number of DSD samples (bits) per channel.
+	SamplesPerChannel int64
+	// BitOrder indicates MSB-first (DFF) or LSB-first (DSF) bit ordering.
+	BitOrder BitOrder
 }
 
 var errUnsupportedBitDepth = errors.New("unsupported bit depth")

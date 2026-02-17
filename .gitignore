@@ -1,4 +1,7 @@
-bin
-mutagen
-_*
 .DS_Store
+.idea
+_*
+bin
+tmp
+third-party
+generated
