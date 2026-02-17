@@ -7,9 +7,9 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/farcloser/primordium/app"
+	"github.com/mycophonic/primordium/app"
 
-	"github.com/farcloser/saprobe/version"
+	"github.com/mycophonic/saprobe/version"
 )
 
 func main() {
@@ -22,6 +22,7 @@ func main() {
 		Version: version.Version() + " (" + version.Commit() + " - " + version.Date() + ")",
 		Commands: []*cli.Command{
 			decodeCommand(),
+			encodeCommand(),
 		},
 	}
 

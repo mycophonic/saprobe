@@ -124,6 +124,8 @@ linters:
     # MAYBE disable revive file-header
 
   disable:
+    # Until we upstream patches on flac
+    - gomoddirectives
     # These are the linters that we know we do not want
     - copyloopvar       # no longer needed after go 1.22
     - errchkjson        # forces handling of json err (eg: prevents _), which is too much
@@ -157,10 +159,6 @@ linters:
 
   exclusions:
     rules:
-      - path: alac/
-        text: "G115"
-        linters:
-          - gosec
       - path: testutil/
         linters:
           - gosec
@@ -237,7 +235,8 @@ linters:
           arguments: [100, 0]
         - name: add-constant
           arguments:
-            - allowInts: "0,1,2,3,4,5,6,7,8,9,-1,16,20,24,32,0xf,0x1f,0x3,0x1,0xFF,0xE0,0x03,0x0F,0x00"
+            - allowFloats: "0.0,1.0"
+              allowInts: "0,1,2,3,4,5,6,7,8,9,-1,16,20,24,32,0xf,0x1f,0x3,0x1,0xFF,0xE0,0x03,0x0F,0x00"
               allowStrs: '"","%w: %q","%w: %w","%w: %s"," ","-","`","\n",":","@",".","%s:%s"'
               ignoreFuncs: 'slog[.].*'
         - name: cognitive-complexity
@@ -266,15 +265,23 @@ linters:
             - $all
           allow:
             - $gostd
-            - github.com/farcloser/saprobe
-            - github.com/farcloser/primordium
-            - github.com/farcloser/agar
+            - github.com/mycophonic/saprobe
+            - github.com/mycophonic/saprobe/aac
+            - github.com/mycophonic/saprobe/detect
+            - github.com/mycophonic/saprobe/vorbis
+            - github.com/mycophonic/saprobe/wav
+            - github.com/mycophonic/saprobe/version
+            - github.com/mycophonic/saprobe-alac
+            - github.com/mycophonic/saprobe-flac
+            - github.com/mycophonic/saprobe-mp3
+            - github.com/mycophonic/saprobe-dsd
+            - github.com/mycophonic/primordium
+            - github.com/mycophonic/agar
+            - github.com/mewkiz/flac
             - github.com/containerd/nerdctl/mod/tigron
             - github.com/urfave/cli/v3
-            - github.com/hajimehoshi/go-mp3
+            - github.com/hajimehoshi/oto/v2
             - github.com/jfreymuth/oggvorbis
-            - github.com/abema/go-mp4
-            - github.com/mewkiz/flac
 
     staticcheck:
       checks:
@@ -286,7 +293,7 @@ formatters:
       sections:
         - standard
         - default
-        - prefix(github.com/farcloser)
+        - prefix(github.com/mycophonic)
         - localmodule
       no-inline-comments: true
       no-prefix-comments: true

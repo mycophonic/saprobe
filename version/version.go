@@ -3,7 +3,7 @@ package version
 //nolint:gochecknoglobals // Set via ldflags at build time.
 var (
 	version = "0.1.0-dev"
-	name    = "saprobe"
+	name    = "sporeprint"
 	commit  = "undefined"
 	date    = "undefined"
 )

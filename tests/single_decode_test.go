@@ -8,16 +8,17 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
-	"github.com/farcloser/saprobe"
-	"github.com/farcloser/saprobe/alac"
-	"github.com/farcloser/saprobe/detect"
-	"github.com/farcloser/saprobe/flac"
-	"github.com/farcloser/saprobe/mp3"
-	"github.com/farcloser/saprobe/vorbis"
+	"github.com/mycophonic/agar/pkg/agar"
+
+	"github.com/mycophonic/saprobe"
+	"github.com/mycophonic/saprobe/alac"
+	"github.com/mycophonic/saprobe/detect"
+	"github.com/mycophonic/saprobe/flac"
+	"github.com/mycophonic/saprobe/mp3"
+	"github.com/mycophonic/saprobe/vorbis"
 )
 
 //nolint:gochecknoglobals
@@ -113,40 +114,24 @@ type fileProperties struct {
 func probeFileProperties(t *testing.T, path string) fileProperties {
 	t.Helper()
 
-	// Get codec, sample rate, channels, bit depth
-	out, err := exec.Command("ffprobe",
-		"-v", "quiet",
-		"-select_streams", "a:0",
-		"-show_entries", "stream=codec_name,sample_rate,channels,bits_per_raw_sample,duration",
-		"-of", "csv=p=0",
-		path,
-	).Output()
+	result, err := agar.FFProbe(path)
 	if err != nil {
 		t.Fatalf("ffprobe failed: %v", err)
 	}
 
-	parts := strings.Split(strings.TrimSpace(string(out)), ",")
-	if len(parts) < 5 {
-		t.Fatalf("unexpected ffprobe output: %s", out)
+	stream, streamErr := result.AudioStream()
+	if streamErr != nil {
+		t.Fatalf("ffprobe: no audio stream in %s", path)
 	}
 
-	props := fileProperties{
-		codec: parts[0],
+	return fileProperties{
+		codec:        stream.CodecName,
+		sampleRate:   stream.SampleRateInt(),
+		channels:     stream.Channels,
+		bitDepth:     stream.BitDepth(),
+		duration:     stream.DurationFloat(),
+		totalSamples: int(stream.DurationFloat() * float64(stream.SampleRateInt())),
 	}
-
-	props.sampleRate, _ = strconv.Atoi(parts[1])
-	props.channels, _ = strconv.Atoi(parts[2])
-	props.bitDepth, _ = strconv.Atoi(parts[3])
-	props.duration, _ = strconv.ParseFloat(parts[4], 64)
-
-	// Default bit depth for lossy or if not reported
-	if props.bitDepth == 0 {
-		props.bitDepth = 16
-	}
-
-	props.totalSamples = int(props.duration * float64(props.sampleRate))
-
-	return props
 }
 
 func pcmFormatFromDepth(bitDepth int, ext string) string {
@@ -180,7 +165,12 @@ func bytesPerSampleFromFormat(pcmFormat string) int {
 func decodeWithFFmpeg(t *testing.T, path, pcmFormat string) []byte {
 	t.Helper()
 
-	cmd := exec.Command("ffmpeg",
+	ffmpegBin, err := agar.LookFor("ffmpeg")
+	if err != nil {
+		t.Fatalf("ffmpeg not found: %v", err)
+	}
+
+	cmd := exec.Command(ffmpegBin,
 		"-i", path,
 		"-f", pcmFormat,
 		"-v", "quiet",
@@ -221,6 +211,8 @@ func decodeWithSaprobe(t *testing.T, path string) ([]byte, saprobe.PCMFormat, er
 		return vorbis.Decode(file)
 	case detect.ALAC:
 		return alac.Decode(file)
+	case detect.WAV, detect.AAC, detect.DSF, detect.DFF:
+		return nil, saprobe.PCMFormat{}, fmt.Errorf("unsupported codec: %s", codec)
 	case detect.Unknown:
 		return nil, saprobe.PCMFormat{}, fmt.Errorf("unsupported codec: %s", codec)
 	default:

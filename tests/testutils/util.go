@@ -1,26 +1,29 @@
 package testutils
 
 import (
-	"path/filepath"
-	"runtime"
+	"testing"
 
 	"github.com/containerd/nerdctl/mod/tigron/test"
 
-	"github.com/farcloser/agar/pkg/agar"
+	"github.com/mycophonic/agar/pkg/agar"
 )
-
-func projectRoot() string {
-	_, thisFile, _, _ := runtime.Caller(0) //nolint:dogsled // runtime.Caller returns 4 values, only file is needed
-
-	return filepath.Dir(filepath.Dir(filepath.Dir(thisFile)))
-}
-
-// BinaryPath returns the absolute path to the saprobe binary.
-func BinaryPath() string {
-	return filepath.Join(projectRoot(), "bin", "saprobe")
-}
 
 // Setup creates a test case configured to run the saprobe binary.
 func Setup() *test.Case {
-	return agar.Setup(BinaryPath())
+	return agar.Setup("saprobe")
+}
+
+// AlacConvertPath returns the path to the alacconvert binary, or an empty
+// string if it is not available. Build it with: make alacconvert.
+func AlacConvertPath(t *testing.T) string {
+	t.Helper()
+
+	path, err := agar.LookFor("alacconvert")
+	if err != nil {
+		t.Log("alacconvert not found: run 'make alacconvert' to enable Apple ALAC reference tests")
+
+		return ""
+	}
+
+	return path
 }

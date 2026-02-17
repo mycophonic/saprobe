@@ -9,12 +9,14 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/farcloser/saprobe"
-	"github.com/farcloser/saprobe/alac"
-	"github.com/farcloser/saprobe/detect"
-	"github.com/farcloser/saprobe/flac"
-	"github.com/farcloser/saprobe/mp3"
-	"github.com/farcloser/saprobe/vorbis"
+	"github.com/mycophonic/saprobe"
+	"github.com/mycophonic/saprobe/aac"
+	"github.com/mycophonic/saprobe/alac"
+	"github.com/mycophonic/saprobe/detect"
+	"github.com/mycophonic/saprobe/flac"
+	"github.com/mycophonic/saprobe/mp3"
+	"github.com/mycophonic/saprobe/vorbis"
+	"github.com/mycophonic/saprobe/wav"
 )
 
 var (
@@ -26,7 +28,7 @@ var (
 func decodeCommand() *cli.Command {
 	return &cli.Command{
 		Name:      "decode",
-		Usage:     "Decode audio file to raw PCM",
+		Usage:     "Decode audio file to WAV (or raw PCM with --raw)",
 		ArgsUsage: "<file>",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
@@ -45,6 +47,10 @@ func decodeCommand() *cli.Command {
 				Name:    "info",
 				Aliases: []string{"i"},
 				Usage:   "print format info and exit without decoding",
+			},
+			&cli.BoolFlag{
+				Name:  "raw",
+				Usage: "output raw PCM instead of WAV",
 			},
 		},
 		Action: runDecode,
@@ -78,6 +84,10 @@ func runDecode(_ context.Context, cmd *cli.Command) error {
 		return decodeAndOutput(cmd, "Vorbis", file, vorbis.Decode)
 	case detect.ALAC:
 		return decodeAndOutput(cmd, "ALAC", file, alac.Decode)
+	case detect.WAV:
+		return decodeAndOutput(cmd, "WAV", file, wav.Decode)
+	case detect.AAC:
+		return decodeAndOutput(cmd, "AAC", file, aac.Decode)
 	case detect.Unknown:
 		return fmt.Errorf("%s: %w", path, errUnsupportedFormat)
 	}
@@ -111,7 +121,11 @@ func decodeAndOutput(cmd *cli.Command, codecName string, rs io.ReadSeeker, decod
 		)
 	}
 
-	return writePCM(cmd.String("output"), pcm)
+	if cmd.Bool("raw") {
+		return writePCM(cmd.String("output"), pcm)
+	}
+
+	return writeWAV(cmd.String("output"), pcm, format)
 }
 
 func writePCM(output string, data []byte) error {
@@ -134,4 +148,23 @@ func writePCM(output string, data []byte) error {
 	}
 
 	return nil
+}
+
+func writeWAV(output string, data []byte, format saprobe.PCMFormat) error {
+	var w io.Writer
+
+	if output == "-" {
+		w = os.Stdout
+	} else {
+		file, err := os.Create(output) //nolint:gosec // CLI tool creates user-specified output files
+		if err != nil {
+			return fmt.Errorf("creating output file: %w", err)
+		}
+
+		defer file.Close()
+
+		w = file
+	}
+
+	return wav.Encode(w, data, format)
 }

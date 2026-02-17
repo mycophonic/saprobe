@@ -8,7 +8,7 @@ import (
 
 	"github.com/jfreymuth/oggvorbis"
 
-	"github.com/farcloser/saprobe"
+	"github.com/mycophonic/saprobe"
 )
 
 // Decode reads an Ogg Vorbis stream and decodes it to interleaved little-endian signed 16-bit PCM bytes.

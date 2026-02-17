@@ -23,37 +23,17 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
         with:
-          go-version: '1.25.6'
+          go-version: '1.25.7'
           cache: true
 
       - name: Install dependencies
         run: |
-          make install-dev-tools
-          sudo apt-get update -qq && sudo apt-get install -qq shellcheck yamllint
+          make init-dev
 
-      - name: Lint Go (all platforms)
-        run: make lint-go-all
-
-      - name: Lint commits
-        if: github.event_name == 'pull_request'
+      - name: Lint
         env:
-          LINT_COMMIT_RANGE: origin/${{ github.base_ref }}..HEAD
-        run: make lint-commits
-
-      - name: Lint go.mod
-        run: make lint-mod
-
-      - name: Lint licenses (all platforms)
-        run: make lint-licenses-all
-
-      - name: Lint headers
-        run: make lint-headers
-
-      - name: Lint YAML
-        run: make lint-yaml
-
-      - name: Lint shell scripts
-        run: make lint-shell
+          LINT_COMMIT_RANGE: ${{ github.event_name == 'pull_request' && format('origin/{0}..HEAD', github.base_ref) || 'main..HEAD' }}
+        run: make lint
 
   test:
     name: Test (${{ matrix.os }})
@@ -61,7 +41,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15, windows-2025]
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, windows-2025]
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -69,7 +49,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
         with:
-          go-version: '1.25.6'
+          go-version: '1.25.7'
           cache: true
 
       - name: Install ffmpeg (Linux)
@@ -78,17 +58,14 @@ jobs:
 
       - name: Install ffmpeg (macOS)
         if: runner.os == 'macOS'
-        run: brew install ffmpeg
+        run: brew install ffmpeg-full
 
       - name: Install ffmpeg (Windows)
         if: runner.os == 'Windows'
         run: choco install ffmpeg -y
 
-      - name: Run unit tests
-        run: make test-unit
-
-      - name: Run race detector tests
-        run: make test-unit-race
+      - name: Run tests
+        run: make test
 
   test-success:
     name: Test
@@ -109,7 +86,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15, windows-2025]
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, windows-2025]
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -117,14 +94,14 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
         with:
-          go-version: '1.25.6'
+          go-version: '1.25.7'
           cache: true
 
       - name: Build binary
         run: make build
 
       - name: Verify binary
-        run: ./bin/saprobe --version
+        run: make verify
 
   build-success:
     name: Build
