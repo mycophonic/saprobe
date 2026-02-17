@@ -1,3 +1,19 @@
+/*
+   Copyright Mycophonic.
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
 package main
 
 import (
@@ -7,8 +23,10 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/mycophonic/primordium/filesystem"
+	flac "github.com/mycophonic/saprobe-flac"
+
 	"github.com/mycophonic/saprobe"
-	"github.com/mycophonic/saprobe/flac"
 )
 
 func encodeCommand() *cli.Command {
@@ -65,9 +83,9 @@ func runEncode(_ context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("invalid bit depth: %w", err)
 	}
 
-	format := saprobe.PCMFormat{
+	format := flac.PCMFormat{
 		SampleRate: cmd.Int("sample-rate"),
-		BitDepth:   bitDepth,
+		BitDepth:   flac.BitDepth(bitDepth),
 		Channels:   uint(cmd.Int("channels")), //nolint:gosec // CLI value is 1-8.
 	}
 
@@ -80,10 +98,12 @@ func runEncode(_ context.Context, cmd *cli.Command) error {
 		return nil
 	}
 
-	file, err := os.Create(output) //nolint:gosec // CLI tool creates user-specified output files.
+	raw, err := os.Create(output) //nolint:gosec // CLI tool creates user-specified output files.
 	if err != nil {
 		return fmt.Errorf("creating output file: %w", err)
 	}
+
+	file := filesystem.NewReadWriter(raw)
 	defer file.Close()
 
 	if err := flac.Encode(file, pcm, format); err != nil {
