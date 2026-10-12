@@ -25,7 +25,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/mycophonic/primordium/filesystem"
+	"github.com/mycophonic/primordium/filesystem/iox"
 	alac "github.com/mycophonic/saprobe-alac"
 	dsd "github.com/mycophonic/saprobe-dsd"
 	flac "github.com/mycophonic/saprobe-flac"
@@ -96,7 +96,7 @@ func runDecode(_ context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("opening %s: %w", path, err)
 	}
 
-	file := filesystem.NewReadSeeker(raw)
+	file := iox.NewReadSeeker(raw)
 	defer file.Close()
 
 	codec, err := detect.Identify(file)
@@ -364,7 +364,7 @@ func streamPCM(output string, r io.Reader) error {
 			return fmt.Errorf("creating output file: %w", err)
 		}
 
-		file := filesystem.NewReadWriter(raw)
+		file := iox.NewReadWriter(raw)
 		defer file.Close()
 
 		writer = file
@@ -388,7 +388,7 @@ func writeWAV(output string, data []byte, format saprobe.PCMFormat) error {
 			return fmt.Errorf("creating output file: %w", err)
 		}
 
-		file := filesystem.NewReadWriter(raw)
+		file := iox.NewReadWriter(raw)
 		defer file.Close()
 
 		writer = file
