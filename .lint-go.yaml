@@ -59,11 +59,9 @@ golangci:
           linters: [gocognit]
         - path: ^wav/decode\.go$
           linters: [gocognit]
-        - path: ^wav/encode\.go$
-          linters: [mnd]
         - path: ^pcm/float\.go$
-          linters: [gosec, mnd]
-          text: G115|Magic number
+          linters: [gosec]
+          text: G115
         - path: ^pcm/truncate\.go$
           linters: [gosec]
           text: G115
