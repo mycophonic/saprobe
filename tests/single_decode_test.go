@@ -462,7 +462,7 @@ func analyzeDifferencePatterns(t *testing.T, saprobeData, ffmpegData []byte, cha
 			count int
 		}
 
-		var diffs []diffEntry
+		diffs := make([]diffEntry, 0, len(offsetCounts))
 		for d, c := range offsetCounts {
 			diffs = append(diffs, diffEntry{d, c})
 		}
