@@ -59,12 +59,6 @@ golangci:
           linters: [gocognit]
         - path: ^wav/decode\.go$
           linters: [gocognit]
-        - path: ^pcm/float\.go$
-          linters: [gosec]
-          text: G115
-        - path: ^pcm/truncate\.go$
-          linters: [gosec]
-          text: G115
           # --- end of the onboarding backlog.
 licenses:
   allowed:
