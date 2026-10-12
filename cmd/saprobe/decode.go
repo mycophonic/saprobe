@@ -297,7 +297,7 @@ func dsdOutputRate(rs io.ReadSeeker, flagRate int) (dsd.OutputRate, error) {
 // autoDSDRate selects a PCM output rate based on the DSD input rate.
 // DSD64 → 176.4 kHz (16:1 ratio), everything else → 352.8 kHz.
 func autoDSDRate(input dsd.InputRate) dsd.OutputRate {
-	switch input {
+	switch input { //nolint:exhaustive // every rate above DSD64 takes the default by design, not by omission
 	case dsd.DSD64:
 		return dsd.Rate176400
 	default:
