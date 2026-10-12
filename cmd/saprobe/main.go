@@ -29,8 +29,9 @@ import (
 )
 
 func main() {
-	ctx := context.Background()
-	app.New(ctx, &app.Options{Name: version.Name()})
+	// app.New returns the context the shutdown handling cancels; running the
+	// command on it is what lets a decode in flight see a signal.
+	ctx := app.New(context.Background(), &app.Options{Name: version.Name(), Version: version.Version()})
 
 	appl := &cli.Command{
 		Name:    version.Name(),
