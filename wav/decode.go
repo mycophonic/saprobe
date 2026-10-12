@@ -49,10 +49,12 @@ const (
 	chunkData = "data"
 )
 
-// WAVEFORMATEXTENSIBLE layout constants.
+// WAV header layout constants.
 const (
+	fmtPCMSize        = 16 // Total fmt chunk size for WAVEFORMAT (PCM, no extension).
 	fmtExtensibleSize = 40 // Total fmt chunk size for WAVEFORMATEXTENSIBLE.
 	riffHeaderSize    = 12 // "RIFF" + fileSize + "WAVE".
+	chunkHeaderSize   = 8  // A chunk ID and its size, before any chunk's data.
 	cbSizeExtensible  = 22 // Extra bytes after WAVEFORMATEX in extensible format.
 )
 
@@ -125,7 +127,7 @@ func NewDecoder(reader io.ReadSeeker) (*Decoder, error) {
 	var dataSize uint32
 
 	for {
-		var chunkHeader [8]byte
+		var chunkHeader [chunkHeaderSize]byte
 		if _, err := io.ReadFull(reader, chunkHeader[:]); err != nil {
 			if errors.Is(err, io.EOF) {
 				break
@@ -205,7 +207,7 @@ func (d *Decoder) Read(p []byte) (int, error) {
 }
 
 func parseFmtChunk(reader io.ReadSeeker, size uint32, format *saprobe.PCMFormat) error {
-	if size < 16 {
+	if size < fmtPCMSize {
 		return ErrUnsupportedFmt
 	}
 

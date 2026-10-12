@@ -40,10 +40,12 @@ const (
 
 	bytesPerFloat32 = 4
 	bytesPerFloat64 = 8
-	maxInt8         = (1 << 7) - 1
-	maxInt16        = (1 << 15) - 1
-	maxInt24        = (1 << 23) - 1
-	maxInt32        = (1 << 31) - 1
+
+	// The largest sample of each width: one bit of the width is the sign.
+	maxInt8  = (1 << (bits8 - 1)) - 1
+	maxInt16 = (1 << (bits16 - 1)) - 1
+	maxInt24 = (1 << (bits24 - 1)) - 1
+	maxInt32 = (1 << (bits32 - 1)) - 1
 )
 
 // FloatToInt converts interleaved little-endian float PCM samples to

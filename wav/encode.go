@@ -65,13 +65,18 @@ func Encode(writer io.Writer, pcm []byte, format saprobe.PCMFormat) error {
 }
 
 func writeWAVSimple(writer io.Writer, pcm []byte, wparams wavParams) error {
-	var header [44]byte
+	// WAVEFORMAT: fmt chunk is the 16-byte PCM header
+	fmtChunkSize := uint32(fmtPCMSize)
+	headerSize := riffHeaderSize + chunkHeaderSize + fmtChunkSize + chunkHeaderSize
+	fileSize := headerSize + wparams.dataSize - chunkHeaderSize // the RIFF chunk header itself is not counted
+
+	var header [44]byte // 12 + 8 + 16 + 8
 
 	copy(header[0:4], chunkRIFF)
-	binary.LittleEndian.PutUint32(header[4:8], wparams.dataSize+36)
+	binary.LittleEndian.PutUint32(header[4:8], fileSize)
 	copy(header[8:12], chunkWAVE)
 	copy(header[12:16], chunkFmt)
-	binary.LittleEndian.PutUint32(header[16:20], 16) // fmt chunk size
+	binary.LittleEndian.PutUint32(header[16:20], fmtChunkSize)
 	binary.LittleEndian.PutUint16(header[20:22], wavFormatPCM)
 	binary.LittleEndian.PutUint16(header[22:24], wparams.channels)
 	binary.LittleEndian.PutUint32(header[24:28], wparams.sampleRate)
@@ -95,8 +100,8 @@ func writeWAVSimple(writer io.Writer, pcm []byte, wparams wavParams) error {
 func writeWAVExtensible(writer io.Writer, pcm []byte, wparams wavParams) error {
 	// WAVEFORMATEXTENSIBLE: fmt chunk is 40 bytes instead of 16
 	fmtChunkSize := uint32(fmtExtensibleSize)
-	headerSize := riffHeaderSize + 8 + fmtChunkSize + 8 // RIFF + fmt header + fmt data + data header
-	fileSize := headerSize + wparams.dataSize - 8       // -8 for RIFF header not counted
+	headerSize := riffHeaderSize + chunkHeaderSize + fmtChunkSize + chunkHeaderSize
+	fileSize := headerSize + wparams.dataSize - chunkHeaderSize // the RIFF chunk header itself is not counted
 
 	var header [68]byte // 12 + 8 + 40 + 8
 
