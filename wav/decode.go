@@ -27,7 +27,7 @@ import (
 	"github.com/mycophonic/saprobe"
 )
 
-//nolint:gochecknoglobals
+//nolint:gochecknoglobals // the bit depths WAV carries, read-only
 var wavBitDepths = []saprobe.BitDepth{
 	saprobe.Depth16,
 	saprobe.Depth24,
@@ -67,7 +67,7 @@ const (
 
 // GUID for PCM in WAVEFORMATEXTENSIBLE.
 //
-//nolint:gochecknoglobals
+//nolint:gochecknoglobals // a WAVE_FORMAT_EXTENSIBLE subformat GUID, read-only
 var wavGUIDPCM = [16]byte{
 	0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00,
 	0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71,
@@ -75,7 +75,7 @@ var wavGUIDPCM = [16]byte{
 
 // GUID for IEEE float in WAVEFORMATEXTENSIBLE.
 //
-//nolint:gochecknoglobals
+//nolint:gochecknoglobals // a WAVE_FORMAT_EXTENSIBLE subformat GUID, read-only
 var wavGUIDFloat = [16]byte{
 	0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00,
 	0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71,
@@ -184,7 +184,7 @@ func NewDecoder(reader io.ReadSeeker) (*Decoder, error) {
 func (d *Decoder) Format() saprobe.PCMFormat { return d.format }
 
 // Read reads decoded PCM bytes from the WAV data chunk.
-func (d *Decoder) Read(p []byte) (int, error) { //nolint:varnamelen // p is idiomatic for io.Reader.Read
+func (d *Decoder) Read(p []byte) (int, error) {
 	remaining := d.dataSize - d.read
 	if remaining <= 0 {
 		return 0, io.EOF
@@ -194,7 +194,7 @@ func (d *Decoder) Read(p []byte) (int, error) { //nolint:varnamelen // p is idio
 		p = p[:remaining]
 	}
 
-	n, err := d.reader.Read(p) //nolint:varnamelen // n is idiomatic for read count
+	n, err := d.reader.Read(p)
 	d.read += int64(n)
 
 	if d.read >= d.dataSize && err == nil {

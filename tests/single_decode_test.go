@@ -39,7 +39,7 @@ import (
 	"github.com/mycophonic/saprobe/wav"
 )
 
-//nolint:gochecknoglobals
+//nolint:gochecknoglobals // a test flag, bound once at init
 var singleFile = flag.String("single-file", "", "single audio file for detailed decode comparison")
 
 // TestSingleDecode performs detailed comparison of a single file between saprobe and ffmpeg.

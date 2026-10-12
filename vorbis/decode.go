@@ -54,7 +54,7 @@ func NewDecoder(rs io.ReadSeeker) (*Decoder, error) {
 		format: saprobe.PCMFormat{
 			SampleRate: reader.SampleRate(),
 			BitDepth:   saprobe.Depth16,
-			Channels:   uint(reader.Channels()), //nolint:gosec // channel count is always small positive
+			Channels:   uint(reader.Channels()),
 		},
 	}, nil
 }
@@ -63,7 +63,7 @@ func NewDecoder(rs io.ReadSeeker) (*Decoder, error) {
 func (d *Decoder) Format() saprobe.PCMFormat { return d.format }
 
 // Read reads decoded PCM bytes from the Vorbis stream.
-func (d *Decoder) Read(p []byte) (int, error) { //nolint:varnamelen // p is idiomatic for io.Reader.Read
+func (d *Decoder) Read(p []byte) (int, error) {
 	total := 0
 
 	for len(p) > 0 {
@@ -86,7 +86,7 @@ func (d *Decoder) Read(p []byte) (int, error) { //nolint:varnamelen // p is idio
 		}
 
 		// Read next chunk of float32 samples.
-		n, err := d.reader.Read(d.floatBuf) //nolint:varnamelen // n is idiomatic for read count
+		n, err := d.reader.Read(d.floatBuf)
 		if n == 0 && err != nil {
 			d.eof = true
 
@@ -110,7 +110,7 @@ func (d *Decoder) Read(p []byte) (int, error) { //nolint:varnamelen // p is idio
 			scaled := math.Round(float64(d.floatBuf[i]) * math.MaxInt16)
 			scaled = max(math.MinInt16, min(math.MaxInt16, scaled))
 
-			binary.LittleEndian.PutUint16(d.buf[i*2:], uint16(int16(scaled))) //nolint:gosec // clamped to int16 range
+			binary.LittleEndian.PutUint16(d.buf[i*2:], uint16(int16(scaled))) // #nosec G115 -- clamped to int16 range
 		}
 
 		d.bufOff = 0

@@ -253,18 +253,18 @@ func float32ToInt(dst, src []byte, dstBits, samples int) {
 
 			binary.LittleEndian.PutUint16(
 				dst[i*2:],
-				uint16(v), //nolint:gosec // Signed-to-unsigned preserves bit pattern.
+				uint16(v), // #nosec G115 -- Signed-to-unsigned preserves bit pattern.
 			)
 		}
 
 	case bits24:
 		for i := range samples {
 			v := int32(clampF64(float64(readFloat32(src, i))) * maxInt24)
-			off := i * 3 //nolint:mnd // 3 bytes per 24-bit sample.
+			off := i * 3
 
 			dst[off] = byte(v)
-			dst[off+1] = byte(v >> 8)  //nolint:mnd // Second byte of 24-bit LE.
-			dst[off+2] = byte(v >> 16) //nolint:mnd // Third byte of 24-bit LE.
+			dst[off+1] = byte(v >> 8)
+			dst[off+2] = byte(v >> 16)
 		}
 
 	case bits32:
@@ -273,7 +273,7 @@ func float32ToInt(dst, src []byte, dstBits, samples int) {
 
 			binary.LittleEndian.PutUint32(
 				dst[i*4:],
-				uint32(v), //nolint:gosec // Signed-to-unsigned preserves bit pattern.
+				uint32(v), // #nosec G115 -- Signed-to-unsigned preserves bit pattern.
 			)
 		}
 	default:
@@ -296,18 +296,18 @@ func float64ToInt(dst, src []byte, dstBits, samples int) {
 
 			binary.LittleEndian.PutUint16(
 				dst[i*2:],
-				uint16(v), //nolint:gosec // Signed-to-unsigned preserves bit pattern.
+				uint16(v), // #nosec G115 -- Signed-to-unsigned preserves bit pattern.
 			)
 		}
 
 	case bits24:
 		for i := range samples {
 			v := int32(clampF64(readFloat64(src, i)) * maxInt24)
-			off := i * 3 //nolint:mnd // 3 bytes per 24-bit sample.
+			off := i * 3
 
 			dst[off] = byte(v)
-			dst[off+1] = byte(v >> 8)  //nolint:mnd // Second byte of 24-bit LE.
-			dst[off+2] = byte(v >> 16) //nolint:mnd // Third byte of 24-bit LE.
+			dst[off+1] = byte(v >> 8)
+			dst[off+2] = byte(v >> 16)
 		}
 
 	case bits32:
@@ -316,7 +316,7 @@ func float64ToInt(dst, src []byte, dstBits, samples int) {
 
 			binary.LittleEndian.PutUint32(
 				dst[i*4:],
-				uint32(v), //nolint:gosec // Signed-to-unsigned preserves bit pattern.
+				uint32(v), // #nosec G115 -- Signed-to-unsigned preserves bit pattern.
 			)
 		}
 	default:
@@ -340,7 +340,7 @@ func intToFloat32(
 
 	case bits16:
 		for i := range samples {
-			v := int16( //nolint:gosec // Unsigned-to-signed preserves bit pattern.
+			v := int16( // #nosec G115 -- Unsigned-to-signed preserves bit pattern.
 				binary.LittleEndian.Uint16(src[i*2:]),
 			)
 
@@ -349,7 +349,7 @@ func intToFloat32(
 
 	case bits24:
 		for sample := range samples {
-			off := sample * 3 //nolint:mnd // 3 bytes per 24-bit sample.
+			off := sample * 3
 
 			// Read 24-bit LE and sign-extend to int32.
 			val := int32(
@@ -358,15 +358,15 @@ func intToFloat32(
 				src[off+1],
 			)<<8 | int32(
 				src[off+2],
-			)<<16 //nolint:mnd // Byte shifts for 24-bit LE.
-			val = (val << 8) >> 8 //nolint:mnd // Sign-extend 24→32.
+			)<<16
+			val = (val << 8) >> 8
 
 			writeFloat32(dst, sample, float32(val)/maxInt24)
 		}
 
 	case bits32:
 		for i := range samples {
-			v := int32( //nolint:gosec // Unsigned-to-signed preserves bit pattern.
+			v := int32( // #nosec G115 -- Unsigned-to-signed preserves bit pattern.
 				binary.LittleEndian.Uint32(src[i*4:]),
 			)
 
@@ -393,7 +393,7 @@ func intToFloat64(
 
 	case bits16:
 		for i := range samples {
-			v := int16( //nolint:gosec // Unsigned-to-signed preserves bit pattern.
+			v := int16( // #nosec G115 -- Unsigned-to-signed preserves bit pattern.
 				binary.LittleEndian.Uint16(src[i*2:]),
 			)
 
@@ -402,7 +402,7 @@ func intToFloat64(
 
 	case bits24:
 		for sample := range samples {
-			off := sample * 3 //nolint:mnd // 3 bytes per 24-bit sample.
+			off := sample * 3
 
 			val := int32(
 				src[off],
@@ -410,15 +410,15 @@ func intToFloat64(
 				src[off+1],
 			)<<8 | int32(
 				src[off+2],
-			)<<16 //nolint:mnd // Byte shifts for 24-bit LE.
-			val = (val << 8) >> 8 //nolint:mnd // Sign-extend 24→32.
+			)<<16
+			val = (val << 8) >> 8
 
 			writeFloat64(dst, sample, float64(val)/maxInt24)
 		}
 
 	case bits32:
 		for i := range samples {
-			v := int32( //nolint:gosec // Unsigned-to-signed preserves bit pattern.
+			v := int32( // #nosec G115 -- Unsigned-to-signed preserves bit pattern.
 				binary.LittleEndian.Uint32(src[i*4:]),
 			)
 

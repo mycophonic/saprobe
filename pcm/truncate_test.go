@@ -85,8 +85,8 @@ func TestTruncate_32to24(t *testing.T) {
 		t.Fatalf("Truncate 32→24: got %d bytes, want 3", n)
 	}
 
-	v := int32(dst[0]) | int32(dst[1])<<8 | int32(dst[2])<<16 //nolint:mnd // 24-bit LE read.
-	got := (v << 8) >> 8                                      //nolint:mnd // Sign-extend.
+	v := int32(dst[0]) | int32(dst[1])<<8 | int32(dst[2])<<16
+	got := (v << 8) >> 8
 
 	expected := int32(0x7F0000)
 	diff := got - expected
