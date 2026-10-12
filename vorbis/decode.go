@@ -63,6 +63,8 @@ func NewDecoder(rs io.ReadSeeker) (*Decoder, error) {
 func (d *Decoder) Format() saprobe.PCMFormat { return d.format }
 
 // Read reads decoded PCM bytes from the Vorbis stream.
+//
+//nolint:gocognit // the decode loop (drain, refill, convert) is the hot path, kept in one function
 func (d *Decoder) Read(p []byte) (int, error) {
 	total := 0
 

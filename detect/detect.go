@@ -114,6 +114,8 @@ var errUnrecognizedSignature = errors.New("unrecognized signature after ID3v2")
 
 // Identify reads the header from rs and returns the detected audio codec.
 // The reader position is reset to the start before returning.
+//
+//nolint:gocognit // one test per signature the detector knows: the branching is the list of formats
 func Identify(reader io.ReadSeeker) (Codec, error) {
 	var header [headerSize]byte
 
