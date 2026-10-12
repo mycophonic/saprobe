@@ -51,8 +51,6 @@ golangci:
         # width on purpose; the sites the authors annotated carry `#nosec
         # G115`, the ones they did not are here until the alignment pass
         # names them.
-        - path: ^cmd/saprobe/decode\.go$
-          linters: [exhaustive]
         - path: ^aiff/decode\.go$
           linters: [gocognit]
         - path: ^detect/detect\.go$
