@@ -52,10 +52,7 @@ golangci:
         # G115`, the ones they did not are here until the alignment pass
         # names them.
         - path: ^cmd/saprobe/decode\.go$
-          linters: [errcheck, exhaustive]
-        - path: ^cmd/saprobe/encode\.go$
-          linters: [errcheck, govet]
-          text: Close|shadow
+          linters: [exhaustive]
         - path: ^aiff/decode\.go$
           linters: [gocognit]
         - path: ^detect/detect\.go$
@@ -72,8 +69,6 @@ golangci:
         - path: ^pcm/truncate\.go$
           linters: [gosec]
           text: G115
-        - path: ^tests/single_decode_test\.go$
-          linters: [errcheck]
           # --- end of the onboarding backlog.
 licenses:
   allowed:
