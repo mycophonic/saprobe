@@ -52,7 +52,7 @@ const mp3DecoderDelay = 529
 // The tigron default (3m) is too short for large hi-res files (e.g. 500MB+ 24-bit/192kHz).
 const massDecodeTimeout = 30 * time.Minute
 
-//nolint:gochecknoglobals
+//nolint:gochecknoglobals // test flags, bound once at init
 var (
 	audioPath = flag.String("audio-path", "", "directory of audio files for mass decode comparison")
 	only      = flag.String("only", "", "filter by file extension (e.g. flac, mp3, ogg, m4a)")
@@ -68,7 +68,13 @@ const (
 	decMpg123
 )
 
-var decoderNames = [...]string{"sp", "ff", "lm", "mp"} //nolint:gochecknoglobals
+//nolint:gochecknoglobals // the decoder short names, read-only test data
+var decoderNames = [...]string{
+	"sp",
+	"ff",
+	"lm",
+	"mp",
+}
 
 func (d decoderID) String() string { return decoderNames[d] }
 
@@ -386,8 +392,6 @@ func comparePair(a, b []byte, idA, idB decoderID, channels int) pairResult {
 }
 
 // classifyMP3Result determines MATCH, FAIL, or HARD CASE from the pairwise results.
-//
-//nolint:cyclop
 func classifyMP3Result(
 	t tig.T, prefix string,
 	outputs []decOutput,
@@ -723,8 +727,6 @@ func codecToPCMFormat(codec, bitsRaw string) (string, bool) {
 }
 
 // comparePCMFiles returns a comparator for non-MP3 codecs (saprobe vs ffmpeg).
-//
-//revive:disable:flag-parameter
 func comparePCMFiles(data test.Data, prefix, codec string, lossy bool, channels string) test.Comparator {
 	return func(_ string, t tig.T) {
 		t.Helper()

@@ -177,7 +177,6 @@ func Identify(reader io.ReadSeeker) (Codec, error) {
 	}
 
 	// MP3: MPEG frame sync word (11 set bits).
-	//nolint:gosec // header is a fixed [8]byte array
 	if header[0] == mpegSyncByte && header[1]&mpegSyncMask == mpegSyncMask {
 		return MP3, nil
 	}
@@ -426,7 +425,7 @@ func probeAfterID3v2(reader io.ReadSeeker, header [headerSize]byte) (Codec, erro
 				return AIFF, nil
 			}
 		}
-	//nolint:gosec // sig is a fixed [4]byte array.
+
 	case sig[0] == mpegSyncByte && sig[1]&mpegSyncMask == mpegSyncMask:
 		return MP3, nil
 	default:

@@ -91,7 +91,7 @@ func runDecode(_ context.Context, cmd *cli.Command) error {
 
 	path := cmd.Args().First()
 
-	raw, err := os.Open(path) //nolint:gosec // CLI tool opens user-specified audio files
+	raw, err := os.Open(path) // #nosec G304 -- CLI tool opens user-specified audio files
 	if err != nil {
 		return fmt.Errorf("opening %s: %w", path, err)
 	}
@@ -175,7 +175,6 @@ type mp3Adapter struct {
 func (a *mp3Adapter) Format() saprobe.PCMFormat {
 	native := a.Decoder.Format()
 
-	//nolint:gosec // BitDepth and Channels are bounded small values from MP3 headers.
 	return saprobe.PCMFormat{
 		SampleRate: native.SampleRate,
 		BitDepth:   saprobe.BitDepth(native.BitDepth),
@@ -210,7 +209,6 @@ type alacAdapter struct {
 func (a *alacAdapter) Format() saprobe.PCMFormat {
 	native := a.Decoder.Format()
 
-	//nolint:gosec // BitDepth and Channels are bounded small values from parsed ALAC config.
 	return saprobe.PCMFormat{
 		SampleRate: native.SampleRate,
 		BitDepth:   saprobe.BitDepth(native.BitDepth),
@@ -263,7 +261,6 @@ type dsdAdapter struct {
 func (a *dsdAdapter) Format() saprobe.PCMFormat {
 	native := a.Decoder.Format()
 
-	//nolint:gosec // Channels is bounded by container parser (1-8).
 	return saprobe.PCMFormat{
 		SampleRate: native.SampleRate,
 		BitDepth:   saprobe.BitDepth(native.BitDepth),
@@ -356,13 +353,13 @@ func decodeAndOutput(cmd *cli.Command, codecName string, rs io.ReadSeeker, facto
 	return writeWAV(cmd.String(flagOutput), pcm, format)
 }
 
-func streamPCM(output string, r io.Reader) error { //nolint:varnamelen // r is idiomatic for io.Reader
+func streamPCM(output string, r io.Reader) error {
 	var writer io.Writer
 
 	if output == "-" {
 		writer = os.Stdout
 	} else {
-		raw, err := os.Create(output) //nolint:gosec // CLI tool creates user-specified output files
+		raw, err := os.Create(output) // #nosec G304 -- CLI tool creates user-specified output files
 		if err != nil {
 			return fmt.Errorf("creating output file: %w", err)
 		}
@@ -386,7 +383,7 @@ func writeWAV(output string, data []byte, format saprobe.PCMFormat) error {
 	if output == "-" {
 		writer = os.Stdout
 	} else {
-		raw, err := os.Create(output) //nolint:gosec // CLI tool creates user-specified output files
+		raw, err := os.Create(output) // #nosec G304 -- CLI tool creates user-specified output files
 		if err != nil {
 			return fmt.Errorf("creating output file: %w", err)
 		}

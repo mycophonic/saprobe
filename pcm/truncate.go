@@ -53,7 +53,7 @@ type Ditherer struct {
 
 // NewDitherer creates a Ditherer seeded from the system clock.
 func NewDitherer() *Ditherer {
-	seed := uint64(time.Now().UnixNano()) //nolint:gosec // Audio dither does not require cryptographic randomness.
+	seed := uint64(time.Now().UnixNano())
 	if seed == 0 {
 		seed = xsFallbackSeed
 	}
@@ -96,8 +96,8 @@ func (d *Ditherer) Truncate(dst, src []byte, srcBits, dstBits int) (int, error) 
 		return 0, ErrShortDst
 	}
 
-	shift := uint(srcBits - dstBits) //nolint:gosec // srcBits > dstBits guaranteed by check above.
-	mask := int64(1)<<shift - 1      // [0, lsb-1] for uniform random range.
+	shift := uint(srcBits - dstBits)
+	mask := int64(1)<<shift - 1 // [0, lsb-1] for uniform random range.
 	maxOut := int32(1)<<(dstBits-1) - 1
 	minOut := -maxOut - 1
 
@@ -105,12 +105,12 @@ func (d *Ditherer) Truncate(dst, src []byte, srcBits, dstBits int) (int, error) 
 		sample := readSample(src, idx*srcBytes, srcBytes)
 
 		// TPDF dither: r1 - r2 gives triangular distribution in [-(lsb-1), +(lsb-1)].
-		r1 := int64(d.next() & uint64(mask)) //nolint:gosec // mask is non-negative (shift ≤ 24).
-		r2 := int64(d.next() & uint64(mask)) //nolint:gosec // mask is non-negative (shift ≤ 24).
+		r1 := int64(d.next() & uint64(mask)) // #nosec G115 -- mask is non-negative (shift ≤ 24).
+		r2 := int64(d.next() & uint64(mask)) // #nosec G115 -- mask is non-negative (shift ≤ 24).
 		dithered := int64(sample) + r1 - r2
 
 		// Arithmetic right-shift to truncate.
-		out := int32(dithered >> shift) //nolint:gosec // Result clamped to target range below.
+		out := int32(dithered >> shift) // #nosec G115 -- Result clamped to target range below.
 
 		// Clamp to target range.
 		if out > maxOut {
@@ -143,16 +143,16 @@ func TruncateSize(srcLen, srcBits, dstBits int) int {
 // srcBytes must be 1, 2, 3, or 4.
 func readSample(src []byte, off, srcBytes int) int32 {
 	switch srcBytes {
-	case 2: //nolint:mnd // 16-bit.
+	case 2:
 		return int32(
-			int16(binary.LittleEndian.Uint16(src[off:])), //nolint:gosec // Unsigned-to-signed preserves bit pattern.
+			int16(binary.LittleEndian.Uint16(src[off:])), // #nosec G115 -- Unsigned-to-signed preserves bit pattern.
 		)
-	case 3: //nolint:mnd // 24-bit.
-		v := int32(src[off]) | int32(src[off+1])<<8 | int32(src[off+2])<<16 //nolint:mnd // Byte shifts for 24-bit LE.
+	case 3:
+		v := int32(src[off]) | int32(src[off+1])<<8 | int32(src[off+2])<<16
 
-		return (v << 8) >> 8 //nolint:mnd // Sign-extend 24→32.
-	case 4: //nolint:mnd // 32-bit.
-		return int32(binary.LittleEndian.Uint32(src[off:])) //nolint:gosec // Unsigned-to-signed preserves bit pattern.
+		return (v << 8) >> 8
+	case 4:
+		return int32(binary.LittleEndian.Uint32(src[off:])) // #nosec G115 -- Unsigned-to-signed preserves bit pattern.
 	default:
 		return int32(int8(src[off]))
 	}
@@ -162,19 +162,19 @@ func readSample(src []byte, off, srcBytes int) int32 {
 // dstBytes must be 1, 2, 3, or 4.
 func writeSample(dst []byte, off int, val int32, dstBytes int) {
 	switch dstBytes {
-	case 2: //nolint:mnd // 16-bit.
+	case 2:
 		binary.LittleEndian.PutUint16(
 			dst[off:],
-			uint16(int16(val)), //nolint:gosec // val clamped to int16 range by caller.
+			uint16(int16(val)), // #nosec G115 -- val clamped to int16 range by caller.
 		)
-	case 3: //nolint:mnd // 24-bit.
+	case 3:
 		dst[off] = byte(val)
-		dst[off+1] = byte(val >> 8)  //nolint:mnd // Second byte of 24-bit LE.
-		dst[off+2] = byte(val >> 16) //nolint:mnd // Third byte of 24-bit LE.
-	case 4: //nolint:mnd // 32-bit.
+		dst[off+1] = byte(val >> 8)
+		dst[off+2] = byte(val >> 16)
+	case 4:
 		binary.LittleEndian.PutUint32(
 			dst[off:],
-			uint32(val), //nolint:gosec // Signed-to-unsigned preserves bit pattern.
+			uint32(val), // #nosec G115 -- Signed-to-unsigned preserves bit pattern.
 		)
 	default:
 		dst[off] = byte(val)

@@ -44,10 +44,10 @@ func Encode(writer io.Writer, pcm []byte, format saprobe.PCMFormat) error {
 	}
 
 	params := wavParams{
-		channels:      uint16(format.Channels),   //nolint:gosec // Channels is 1-8, validated by caller.
-		sampleRate:    uint32(format.SampleRate), //nolint:gosec // Sample rate is positive, fits uint32.
-		bitsPerSample: uint16(format.BitDepth),   //nolint:gosec // BitDepth is validated above (16/24/32).
-		dataSize:      uint32(len(pcm)),          //nolint:gosec // PCM length is bounded by available memory.
+		channels:      uint16(format.Channels),   // #nosec G115 -- Channels is 1-8, validated by caller.
+		sampleRate:    uint32(format.SampleRate), // #nosec G115 -- Sample rate is positive, fits uint32.
+		bitsPerSample: uint16(format.BitDepth),   // #nosec G115 -- BitDepth is validated above (16/24/32).
+		dataSize:      uint32(len(pcm)),          // #nosec G115 -- PCM length is bounded by available memory.
 		isFloat:       format.IsFloat,
 	}
 

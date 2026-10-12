@@ -43,8 +43,6 @@ const bitsPerByte = 8
 // bytes of each container and high bytes are zero-padded.
 //
 // Returns the number of bytes written to dst.
-//
-//revive:disable-next-line:flag-parameter // alignHigh selects MSB vs LSB justification; a bool is the natural API.
 func Pack(dst, src []byte, srcBits, dstBits int, alignHigh bool) (int, error) {
 	srcBytes := srcBits / bitsPerByte
 	dstBytes := dstBits / bitsPerByte

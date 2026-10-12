@@ -58,8 +58,8 @@ func putInt32LE(buf []byte, v int32) {
 // putInt24LE writes a 24-bit signed integer as 3 little-endian bytes.
 func putInt24LE(buf []byte, v int32) {
 	buf[0] = byte(v)
-	buf[1] = byte(v >> 8)  //nolint:mnd // Second byte of 24-bit LE.
-	buf[2] = byte(v >> 16) //nolint:mnd // Third byte of 24-bit LE.
+	buf[1] = byte(v >> 8)
+	buf[2] = byte(v >> 16)
 }
 
 func TestFloatToInt_Boundary(t *testing.T) {
@@ -112,7 +112,7 @@ func TestFloatToInt_Boundary(t *testing.T) {
 			srcBytes := tt.srcBits / 8
 			src := make([]byte, srcBytes)
 
-			if tt.srcBits == 32 { //nolint:mnd // Float32 bit depth.
+			if tt.srcBits == 32 {
 				putFloat32LE(src, float32(tt.input))
 			} else {
 				putFloat64LE(src, tt.input)
@@ -133,14 +133,14 @@ func TestFloatToInt_Boundary(t *testing.T) {
 			var got int32
 
 			switch tt.dstBits {
-			case 8: //nolint:mnd // Bit depth constant.
+			case 8:
 				got = int32(int8(dst[0]))
-			case 16: //nolint:mnd // Bit depth constant.
+			case 16:
 				got = int32(int16(binary.LittleEndian.Uint16(dst)))
-			case 24: //nolint:mnd // Bit depth constant.
-				v := int32(dst[0]) | int32(dst[1])<<8 | int32(dst[2])<<16 //nolint:mnd // 24-bit LE read.
-				got = (v << 8) >> 8                                       //nolint:mnd // Sign-extend 24→32.
-			case 32: //nolint:mnd // Bit depth constant.
+			case 24:
+				v := int32(dst[0]) | int32(dst[1])<<8 | int32(dst[2])<<16
+				got = (v << 8) >> 8
+			case 32:
 				got = int32(binary.LittleEndian.Uint32(dst))
 			default:
 			}
@@ -296,13 +296,13 @@ func TestIntToFloat_Boundary(t *testing.T) {
 			src := make([]byte, srcBytes)
 
 			switch tt.srcBits {
-			case 8: //nolint:mnd // Bit depth constant.
+			case 8:
 				src[0] = byte(tt.input)
-			case 16: //nolint:mnd // Bit depth constant.
+			case 16:
 				putInt16LE(src, int16(tt.input))
-			case 24: //nolint:mnd // Bit depth constant.
+			case 24:
 				putInt24LE(src, tt.input)
-			case 32: //nolint:mnd // Bit depth constant.
+			case 32:
 				putInt32LE(src, tt.input)
 			default:
 			}
@@ -321,7 +321,7 @@ func TestIntToFloat_Boundary(t *testing.T) {
 
 			var got float64
 
-			if tt.dstBits == 32 { //nolint:mnd // Float32 bit depth.
+			if tt.dstBits == 32 {
 				got = float64(readFloat32LE(dst))
 			} else {
 				got = readFloat64LE(dst)
@@ -365,13 +365,13 @@ func TestIntToFloat_RoundTrip(t *testing.T) {
 				off := i * srcBytes
 
 				switch tt.intBits {
-				case 8: //nolint:mnd // Bit depth constant.
+				case 8:
 					src[off] = byte(v)
-				case 16: //nolint:mnd // Bit depth constant.
+				case 16:
 					putInt16LE(src[off:], int16(v))
-				case 24: //nolint:mnd // Bit depth constant.
+				case 24:
 					putInt24LE(src[off:], v)
-				case 32: //nolint:mnd // Bit depth constant.
+				case 32:
 					putInt32LE(src[off:], v)
 				default:
 				}
@@ -401,20 +401,20 @@ func TestIntToFloat_RoundTrip(t *testing.T) {
 				var got int32
 
 				switch tt.intBits {
-				case 8: //nolint:mnd // Bit depth constant.
+				case 8:
 					got = int32(int8(intBuf[off]))
-				case 16: //nolint:mnd // Bit depth constant.
+				case 16:
 					got = int32(int16(binary.LittleEndian.Uint16(intBuf[off:])))
-				case 24: //nolint:mnd // Bit depth constant.
+				case 24:
 					v := int32(
 						intBuf[off],
 					) | int32(
 						intBuf[off+1],
 					)<<8 | int32(
 						intBuf[off+2],
-					)<<16 //nolint:mnd // 24-bit LE.
-					got = (v << 8) >> 8 //nolint:mnd // Sign-extend.
-				case 32: //nolint:mnd // Bit depth constant.
+					)<<16
+					got = (v << 8) >> 8
+				case 32:
 					got = int32(binary.LittleEndian.Uint32(intBuf[off:]))
 				default:
 				}

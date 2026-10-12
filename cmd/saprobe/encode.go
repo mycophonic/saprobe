@@ -71,13 +71,13 @@ func runEncode(_ context.Context, cmd *cli.Command) error {
 
 	path := cmd.Args().First()
 
-	pcm, err := os.ReadFile(path) //nolint:gosec // CLI tool reads user-specified audio files.
+	pcm, err := os.ReadFile(path) // #nosec G304 -- CLI tool reads user-specified audio files.
 	if err != nil {
 		return fmt.Errorf("reading %s: %w", path, err)
 	}
 
 	bitDepth, err := saprobe.ToBitDepth(
-		uint8(cmd.Int("bit-depth")), //nolint:gosec // CLI value validated by ToBitDepth.
+		uint8(cmd.Int("bit-depth")), // #nosec G115 -- CLI value validated by ToBitDepth.
 	)
 	if err != nil {
 		return fmt.Errorf("invalid bit depth: %w", err)
@@ -86,7 +86,7 @@ func runEncode(_ context.Context, cmd *cli.Command) error {
 	format := flac.PCMFormat{
 		SampleRate: cmd.Int("sample-rate"),
 		BitDepth:   flac.BitDepth(bitDepth),
-		Channels:   uint(cmd.Int("channels")), //nolint:gosec // CLI value is 1-8.
+		Channels:   uint(cmd.Int("channels")),
 	}
 
 	output := cmd.String("output")
@@ -98,7 +98,7 @@ func runEncode(_ context.Context, cmd *cli.Command) error {
 		return nil
 	}
 
-	raw, err := os.Create(output) //nolint:gosec // CLI tool creates user-specified output files.
+	raw, err := os.Create(output) // #nosec G304 -- CLI tool creates user-specified output files.
 	if err != nil {
 		return fmt.Errorf("creating output file: %w", err)
 	}

@@ -28,7 +28,7 @@ import (
 	"github.com/mycophonic/saprobe"
 )
 
-//nolint:gochecknoglobals
+//nolint:gochecknoglobals // the bit depths AIFF carries, read-only
 var aiffBitDepths = []saprobe.BitDepth{
 	saprobe.Depth16,
 	saprobe.Depth24,
@@ -107,7 +107,7 @@ func (d *Decoder) Format() saprobe.PCMFormat { return d.format }
 
 // Read reads decoded PCM bytes from the AIFF sound data.
 // Big-endian samples are byte-swapped to little-endian on the fly.
-func (d *Decoder) Read(p []byte) (int, error) { //nolint:varnamelen // p is idiomatic for io.Reader.Read.
+func (d *Decoder) Read(p []byte) (int, error) {
 	remaining := d.dataSize - d.read
 	if remaining <= 0 {
 		return 0, io.EOF
@@ -117,7 +117,7 @@ func (d *Decoder) Read(p []byte) (int, error) { //nolint:varnamelen // p is idio
 		p = p[:remaining]
 	}
 
-	n, err := d.reader.Read(p) //nolint:varnamelen // n is idiomatic for read count.
+	n, err := d.reader.Read(p)
 	d.read += int64(n)
 
 	if d.bigEndian && n > 0 {
