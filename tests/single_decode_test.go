@@ -182,7 +182,7 @@ func decodeWithSaprobe(t *testing.T, path string) ([]byte, saprobe.PCMFormat, er
 	if err != nil {
 		return nil, saprobe.PCMFormat{}, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }() // read-only: a close error carries nothing
 
 	codec, err := detect.Identify(file)
 	if err != nil {
@@ -197,7 +197,7 @@ func decodeWithSaprobe(t *testing.T, path string) ([]byte, saprobe.PCMFormat, er
 		if flacErr != nil {
 			return nil, saprobe.PCMFormat{}, flacErr
 		}
-		defer dec.Close()
+		defer func() { _ = dec.Close() }() // the decoder reads: its close error carries nothing
 
 		pcm, readErr := io.ReadAll(dec)
 		if readErr != nil {

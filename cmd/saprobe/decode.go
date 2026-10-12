@@ -97,7 +97,7 @@ func runDecode(_ context.Context, cmd *cli.Command) error {
 	}
 
 	file := iox.NewReadSeeker(raw)
-	defer file.Close()
+	defer func() { _ = file.Close() }() // read-only: a close error carries nothing
 
 	codec, err := detect.Identify(file)
 	if err != nil {
@@ -312,7 +312,7 @@ func decodeAndOutput(cmd *cli.Command, codecName string, rs io.ReadSeeker, facto
 	}
 
 	if closer, ok := dec.(io.Closer); ok {
-		defer closer.Close()
+		defer func() { _ = closer.Close() }() // a decoder reads: its close error carries nothing
 	}
 
 	format := dec.Format()
@@ -354,48 +354,48 @@ func decodeAndOutput(cmd *cli.Command, codecName string, rs io.ReadSeeker, facto
 }
 
 func streamPCM(output string, r io.Reader) error {
-	var writer io.Writer
-
-	if output == "-" {
-		writer = os.Stdout
-	} else {
-		raw, err := os.Create(output) // #nosec G304 -- CLI tool creates user-specified output files
-		if err != nil {
-			return fmt.Errorf("creating output file: %w", err)
+	return withOutput(output, func(writer io.Writer) error {
+		if _, err := io.Copy(writer, r); err != nil {
+			return fmt.Errorf("writing output: %w", err)
 		}
 
-		file := iox.NewReadWriter(raw)
-		defer file.Close()
-
-		writer = file
-	}
-
-	if _, err := io.Copy(writer, r); err != nil {
-		return fmt.Errorf("writing output: %w", err)
-	}
-
-	return nil
+		return nil
+	})
 }
 
 func writeWAV(output string, data []byte, format saprobe.PCMFormat) error {
-	var writer io.Writer
-
-	if output == "-" {
-		writer = os.Stdout
-	} else {
-		raw, err := os.Create(output) // #nosec G304 -- CLI tool creates user-specified output files
-		if err != nil {
-			return fmt.Errorf("creating output file: %w", err)
+	return withOutput(output, func(writer io.Writer) error {
+		if err := wav.Encode(writer, data, format); err != nil {
+			return fmt.Errorf("encoding WAV: %w", err)
 		}
 
-		file := iox.NewReadWriter(raw)
-		defer file.Close()
+		return nil
+	})
+}
 
-		writer = file
+// withOutput runs write against the output path, stdout for "-". The file
+// is buffered and its Close flushes the tail of the data, so a close error
+// is a write error and is reported; a write error is reported over it.
+func withOutput(output string, write func(io.Writer) error) error {
+	if output == "-" {
+		return write(os.Stdout)
 	}
 
-	if err := wav.Encode(writer, data, format); err != nil {
-		return fmt.Errorf("encoding WAV: %w", err)
+	raw, err := os.Create(output) // #nosec G304 -- CLI tool creates user-specified output files
+	if err != nil {
+		return fmt.Errorf("creating output file: %w", err)
+	}
+
+	file := iox.NewReadWriter(raw)
+
+	if err = write(file); err != nil {
+		_ = file.Close()
+
+		return err
+	}
+
+	if err = file.Close(); err != nil {
+		return fmt.Errorf("closing output file: %w", err)
 	}
 
 	return nil

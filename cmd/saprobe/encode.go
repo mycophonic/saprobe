@@ -91,7 +91,7 @@ func runEncode(_ context.Context, cmd *cli.Command) error {
 
 	output := cmd.String("output")
 	if output == "-" {
-		if err := flac.Encode(os.Stdout, pcm, format); err != nil {
+		if err = flac.Encode(os.Stdout, pcm, format); err != nil {
 			return fmt.Errorf("encoding: %w", err)
 		}
 
@@ -104,9 +104,13 @@ func runEncode(_ context.Context, cmd *cli.Command) error {
 	}
 
 	file := iox.NewReadWriter(raw)
-	defer file.Close()
 
-	if err := flac.Encode(file, pcm, format); err != nil {
+	// flac.Encode closes a writer that can be closed, and that close flushes
+	// the file: its error is the encoder's. A failure before that point
+	// leaves the file open, and the close then has nothing left to report.
+	if err = flac.Encode(file, pcm, format); err != nil {
+		_ = file.Close()
+
 		return fmt.Errorf("encoding: %w", err)
 	}
 
