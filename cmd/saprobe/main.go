@@ -30,7 +30,7 @@ import (
 
 func main() {
 	ctx := context.Background()
-	app.New(ctx, version.Name())
+	app.New(ctx, &app.Options{Name: version.Name()})
 
 	appl := &cli.Command{
 		Name:    version.Name(),

@@ -23,7 +23,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/mycophonic/primordium/filesystem"
+	"github.com/mycophonic/primordium/filesystem/iox"
 	flac "github.com/mycophonic/saprobe-flac"
 
 	"github.com/mycophonic/saprobe"
@@ -103,7 +103,7 @@ func runEncode(_ context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("creating output file: %w", err)
 	}
 
-	file := filesystem.NewReadWriter(raw)
+	file := iox.NewReadWriter(raw)
 	defer file.Close()
 
 	if err := flac.Encode(file, pcm, format); err != nil {
