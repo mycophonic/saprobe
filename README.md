@@ -78,7 +78,7 @@ Our fork additionally provides:
 - 32 bits support
 - optimizations for the decoder (about 2x faster than upstream)
 
-For performance measurements, detailed format support and comparison with other tools, see [FLAC](../saprobe-flac/docs/FLAC.md).
+For performance measurements, detailed format support and comparison with other tools, see [FLAC](https://github.com/mycophonic/saprobe-flac/blob/main/docs/FLAC.md).
 
 ### P0: ALAC
 
