@@ -24,19 +24,24 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/mycophonic/primordium/app"
-
-	"github.com/mycophonic/saprobe/version"
 )
+
+const name = "saprobe"
+
+// version is the build's stamp: the shared build recipe sets it from `git describe`
+// through -X main.version; a plain `go build` leaves "dev". gochecknoglobals
+// exempts the name for this use.
+var version = "dev"
 
 func main() {
 	// app.New returns the context the shutdown handling cancels; running the
 	// command on it is what lets a decode in flight see a signal.
-	ctx := app.New(context.Background(), &app.Options{Name: version.Name(), Version: version.Version()})
+	ctx := app.New(context.Background(), &app.Options{Name: name, Version: version})
 
 	appl := &cli.Command{
-		Name:    version.Name(),
+		Name:    name,
 		Usage:   "Audio decoding cli (AIFF, ALAC, FLAC, DSD, AAC, MP3, OGG, WAV)",
-		Version: version.Version() + " (" + version.Commit() + " - " + version.Date() + ")",
+		Version: version,
 		Commands: []*cli.Command{
 			decodeCommand(),
 			encodeCommand(),
