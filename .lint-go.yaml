@@ -39,7 +39,6 @@ golangci:
             - noctx # no cancellation to propagate
             - perfsprint # readability over allocations
             - mnd # fixture values
-
 licenses:
   allowed:
     # The baseline's list, plus Unlicense: mycophonic/flac keeps mewkiz/flac's
@@ -53,9 +52,3 @@ licenses:
     # go-licenses cannot resolve the LICENSE of the gotest.tools/v3
     # submodule (google/go-licenses#186).
     - gotest.tools/v3
-nilaway:
-  # Onboarding backlog, as the golangci block above: NilAway reports one
-  # potential nil dereference (tests/single_decode_test.go) that nobody has
-  # read yet. It prints without failing the lane until the alignment pass
-  # judges it; the last alignment pull request sets this back to blocking.
-  blocking: false
