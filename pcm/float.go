@@ -246,7 +246,7 @@ func float32ToInt(dst, src []byte, dstBits, samples int) {
 		for i := range samples {
 			v := int8(clampF64(float64(readFloat32(src, i))) * maxInt8)
 
-			dst[i] = byte(v)
+			dst[i] = byte(v) // #nosec G115 -- Signed-to-unsigned preserves bit pattern.
 		}
 
 	case bits16:
@@ -264,9 +264,9 @@ func float32ToInt(dst, src []byte, dstBits, samples int) {
 			v := int32(clampF64(float64(readFloat32(src, i))) * maxInt24)
 			off := i * 3
 
-			dst[off] = byte(v)
-			dst[off+1] = byte(v >> 8)
-			dst[off+2] = byte(v >> 16)
+			dst[off] = byte(v)         // #nosec G115 -- Packs a byte of the 24-bit sample; truncation intended.
+			dst[off+1] = byte(v >> 8)  // #nosec G115 -- Packs a byte of the 24-bit sample; truncation intended.
+			dst[off+2] = byte(v >> 16) // #nosec G115 -- Packs a byte of the 24-bit sample; truncation intended.
 		}
 
 	case bits32:
@@ -289,7 +289,7 @@ func float64ToInt(dst, src []byte, dstBits, samples int) {
 		for i := range samples {
 			v := int8(clampF64(readFloat64(src, i)) * maxInt8)
 
-			dst[i] = byte(v)
+			dst[i] = byte(v) // #nosec G115 -- Signed-to-unsigned preserves bit pattern.
 		}
 
 	case bits16:
@@ -307,9 +307,9 @@ func float64ToInt(dst, src []byte, dstBits, samples int) {
 			v := int32(clampF64(readFloat64(src, i)) * maxInt24)
 			off := i * 3
 
-			dst[off] = byte(v)
-			dst[off+1] = byte(v >> 8)
-			dst[off+2] = byte(v >> 16)
+			dst[off] = byte(v)         // #nosec G115 -- Packs a byte of the 24-bit sample; truncation intended.
+			dst[off+1] = byte(v >> 8)  // #nosec G115 -- Packs a byte of the 24-bit sample; truncation intended.
+			dst[off+2] = byte(v >> 16) // #nosec G115 -- Packs a byte of the 24-bit sample; truncation intended.
 		}
 
 	case bits32:
@@ -335,7 +335,7 @@ func intToFloat32(
 	switch srcBits {
 	case bits8:
 		for i := range samples {
-			v := int8(src[i])
+			v := int8(src[i]) // #nosec G115 -- Unsigned-to-signed preserves bit pattern.
 
 			writeFloat32(dst, i, float32(v)/maxInt8)
 		}
@@ -388,7 +388,7 @@ func intToFloat64(
 	switch srcBits {
 	case bits8:
 		for i := range samples {
-			v := int8(src[i])
+			v := int8(src[i]) // #nosec G115 -- Unsigned-to-signed preserves bit pattern.
 
 			writeFloat64(dst, i, float64(v)/maxInt8)
 		}

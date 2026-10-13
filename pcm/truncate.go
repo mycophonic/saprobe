@@ -154,7 +154,7 @@ func readSample(src []byte, off, srcBytes int) int32 {
 	case 4:
 		return int32(binary.LittleEndian.Uint32(src[off:])) // #nosec G115 -- Unsigned-to-signed preserves bit pattern.
 	default:
-		return int32(int8(src[off]))
+		return int32(int8(src[off])) // #nosec G115 -- Unsigned-to-signed preserves bit pattern.
 	}
 }
 
@@ -168,16 +168,16 @@ func writeSample(dst []byte, off int, val int32, dstBytes int) {
 			uint16(int16(val)), // #nosec G115 -- val clamped to int16 range by caller.
 		)
 	case 3:
-		dst[off] = byte(val)
-		dst[off+1] = byte(val >> 8)
-		dst[off+2] = byte(val >> 16)
+		dst[off] = byte(val)         // #nosec G115 -- Packs a byte of the 24-bit sample; truncation intended.
+		dst[off+1] = byte(val >> 8)  // #nosec G115 -- Packs a byte of the 24-bit sample; truncation intended.
+		dst[off+2] = byte(val >> 16) // #nosec G115 -- Packs a byte of the 24-bit sample; truncation intended.
 	case 4:
 		binary.LittleEndian.PutUint32(
 			dst[off:],
 			uint32(val), // #nosec G115 -- Signed-to-unsigned preserves bit pattern.
 		)
 	default:
-		dst[off] = byte(val)
+		dst[off] = byte(val) // #nosec G115 -- val clamped to int8 range by caller.
 	}
 }
 
