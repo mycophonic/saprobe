@@ -108,6 +108,8 @@ type Decoder struct {
 
 // NewDecoder opens a WAV file and returns a streaming decoder.
 // The fmt chunk is parsed immediately; PCM data is read on demand via Read.
+//
+//nolint:gocognit // the RIFF chunk walk, one branch per chunk kind plus the pad byte: the container's own
 func NewDecoder(reader io.ReadSeeker) (*Decoder, error) {
 	var format saprobe.PCMFormat
 

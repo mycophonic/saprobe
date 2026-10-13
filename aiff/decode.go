@@ -153,6 +153,8 @@ func readFormHeader(reader io.ReadSeeker) (string, error) {
 
 // parseChunks iterates IFF chunks to find COMM and SSND, then returns a Decoder
 // positioned at the start of the sound data.
+//
+//nolint:gocognit // the IFF chunk walk, one branch per chunk kind plus the pad byte: the container's own
 func parseChunks(reader io.ReadSeeker, formType string) (*Decoder, error) {
 	var format saprobe.PCMFormat
 
