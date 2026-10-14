@@ -24,6 +24,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/mycophonic/primordium/app"
+	"github.com/mycophonic/primordium/app/shutdown"
 )
 
 const name = "saprobe"
@@ -48,9 +49,25 @@ func main() {
 		},
 	}
 
+	// urfave/cli exits the process itself for its own errors (an unknown
+	// command, a cli.Exit): hooking its exiter runs the handlers on that path
+	// too.
+	cli.OsExiter = func(code int) { //nolint:reassign // cli.OsExiter is the package's documented hook for the exit
+		shutdown.Shutdown()
+		os.Exit(code)
+	}
+
+	// The handlers app.New registered (the reporter flush, the stores) run
+	// only on a signal unless main runs them before exiting; a bare return
+	// from main would skip them.
+	code := 0
+
 	if err := appl.Run(ctx, os.Args); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 
-		os.Exit(1)
+		code = 1
 	}
+
+	shutdown.Shutdown()
+	os.Exit(code)
 }
