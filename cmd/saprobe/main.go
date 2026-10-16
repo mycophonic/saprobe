@@ -35,10 +35,6 @@ const name = "saprobe"
 var version = "dev"
 
 func main() {
-	// app.New returns the context the shutdown handling cancels; running the
-	// command on it is what lets a decode in flight see a signal.
-	ctx := app.New(context.Background(), &app.Options{Name: name, Version: version})
-
 	appl := &cli.Command{
 		Name:    name,
 		Usage:   "Audio decoding cli (AIFF, ALAC, FLAC, DSD, AAC, MP3, OGG, WAV)",
@@ -49,25 +45,20 @@ func main() {
 		},
 	}
 
-	// urfave/cli exits the process itself for its own errors (an unknown
-	// command, a cli.Exit): hooking its exiter runs the handlers on that path
-	// too.
-	cli.OsExiter = func(code int) { //nolint:reassign // cli.OsExiter is the package's documented hook for the exit
-		shutdown.Shutdown()
-		os.Exit(code)
-	}
+	// urfave/cli exits the process itself for its own errors; shutdown.Exit runs
+	// the handlers first.
+	cli.OsExiter = shutdown.Exit //nolint:reassign // cli.OsExiter is the package's documented hook for the exit
 
-	// The handlers app.New registered (the reporter flush, the stores) run
-	// only on a signal unless main runs them before exiting; a bare return
-	// from main would skip them.
-	code := 0
+	// app.Main runs the command on a context a shutdown signal cancels, then the
+	// handlers, and exits: 0 on nil, the asked status on an ExitError, which it
+	// does not log; the error is printed here, once.
+	app.Main(&app.Options{Name: name, Version: version}, func(ctx context.Context) error {
+		if err := appl.Run(ctx, os.Args); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 
-	if err := appl.Run(ctx, os.Args); err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return shutdown.ExitError(1)
+		}
 
-		code = 1
-	}
-
-	shutdown.Shutdown()
-	os.Exit(code)
+		return nil
+	})
 }
