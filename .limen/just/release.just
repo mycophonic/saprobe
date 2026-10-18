@@ -32,7 +32,7 @@ release *args:
     usage() {
         echo "usage: just do release <tag>                                               # signed tag + push; CI builds, signs (keyless), publishes (no .release-go.yaml: the release page, with notes)" >&2
         echo "       just do release --local <cosign-key> <tag> [--cosign-password-stdin] # fully local, key-based cosign" >&2
-        echo "       just do release --local --dry-run                                   # local unsigned snapshot into build/release/" >&2
+        echo "       just do release --local --dry-run                                   # local unsigned snapshot into .build/release/" >&2
         echo "       just do release --ci                                                # workflow half of the default lane (GitHub Actions only)" >&2
     }
     require_clean() {
@@ -44,9 +44,12 @@ release *args:
             exit 1
         fi
     }
+    # A fourth segment is a fork's rebuild of the same upstream version
+    # (v10.6.1.2, book/forks.md): never a -suffix, which semver sorts before
+    # the release it rebuilds.
     require_version_tag() {
-        if ! printf '%s' "$1" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$'; then
-            echo "'$1' is not a version tag (vX.Y.Z or vX.Y.Z-prerelease, e.g. v0.0.0-test.1)." >&2
+        if ! printf '%s' "$1" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?(-[0-9A-Za-z][0-9A-Za-z.-]*)?$'; then
+            echo "'$1' is not a version tag (vX.Y.Z, vX.Y.Z-prerelease, or a fork's rebuild vX.Y.Z.N)." >&2
             exit 2
         fi
     }
@@ -81,14 +84,30 @@ release *args:
     # publisher in this lane.
     # No tag while a pull request is open, a bot's included: what is open is
     # part of the release or the next one's first commit, and both say wait
-    # (book/recipes.md). gh resolves the repository from origin, the remote
-    # the tag goes to.
+    # (book/recipes.md). A pull request the human parks, one the release must
+    # not carry and that is not closed only to tag, is named in PARKED_PRS
+    # (numbers, space-separated); it is printed as skipped, and every other
+    # open one still blocks. gh resolves the repository from origin, the
+    # remote the tag goes to.
     require_empty_queue() {
-        local open
-        open=$(gh pr list --state open --json number --jq 'length' -R "$(git remote get-url origin)")
-        if [ "$open" != 0 ]; then
-            echo "$open pull request(s) are open — a release waits for an empty queue (merge or close them first):" >&2
-            gh pr list --state open -R "$(git remote get-url origin)" >&2
+        local repo list number title blocking=0
+        repo=$(git remote get-url origin)
+        # The list first, so a gh failure refuses: fed through a process
+        # substitution the loop would read nothing and the tag would proceed
+        # against an unknown queue.
+        list=$(gh pr list --state open --json number,title --jq '.[] | "\(.number)\t\(.title)"' -R "$repo") || {
+            echo "gh pr list failed: the queue is unknown, no tag." >&2
+            exit 1
+        }
+        while IFS=$'\t' read -r number title; do
+            [ -n "$number" ] || continue
+            case " ${PARKED_PRS:-} " in
+                *" $number "*) echo "parked, not blocking the tag (PARKED_PRS): #$number $title" ;;
+                *) echo "open, blocking the tag: #$number $title" >&2; blocking=1 ;;
+            esac
+        done <<< "$list"
+        if [ "$blocking" = 1 ]; then
+            echo "a release waits for an empty queue: merge or close what is open, or name a parked pull request in PARKED_PRS." >&2
             exit 1
         fi
     }
@@ -260,8 +279,15 @@ release *args:
                     echo "tag $tag pushed — its release page already exists (a retry): nothing to build or publish."
                 else
                     opts=(--verify-tag --generate-notes)
+                    # The previous tag must exist on the remote: a tag deleted
+                    # there survives in a clone (pull prunes no tags), and gh
+                    # answers HTTP 400 to a start tag GitHub does not know.
                     if previous="$(git describe --tags --match "v*" --abbrev=0 "$tag^" 2>/dev/null)"; then
-                        opts+=(--notes-start-tag "$previous")
+                        if git ls-remote --exit-code --tags origin "refs/tags/$previous" >/dev/null 2>&1; then
+                            opts+=(--notes-start-tag "$previous")
+                        else
+                            echo "previous tag $previous is not on origin (deleted there, kept here): the notes start at GitHub's last published release." >&2
+                        fi
                     fi
                     case "$tag" in *-*) opts+=(--prerelease) ;; esac
                     gh release create "$tag" -R "$repo" "${opts[@]}"
