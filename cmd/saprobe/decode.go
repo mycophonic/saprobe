@@ -17,13 +17,10 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-
-	"github.com/urfave/cli/v3"
 
 	"github.com/mycophonic/primordium/filesystem/iox"
 	alac "github.com/mycophonic/saprobe-alac"
@@ -39,57 +36,24 @@ import (
 	"github.com/mycophonic/saprobe/wav"
 )
 
-const flagOutput = "output"
-
 var (
 	errUnsupportedFormat = errors.New("unsupported audio format")
 	errBitDepthMismatch  = errors.New("bit depth conversion is not yet implemented")
-	errInvalidArgCount   = errors.New("expected exactly one argument: file path")
 )
 
-func decodeCommand() *cli.Command {
-	return &cli.Command{
-		Name:      "decode",
-		Usage:     "Decode audio file to WAV (or raw PCM with --raw)",
-		ArgsUsage: "<file>",
-		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:    flagOutput,
-				Aliases: []string{"o"},
-				Value:   "-",
-				Usage:   "output file path (- for stdout)",
-			},
-			&cli.IntFlag{
-				Name:    "bit-depth",
-				Aliases: []string{"b"},
-				Value:   0,
-				Usage:   "force output bit depth (16, 24, 32); 0 preserves native",
-			},
-			&cli.BoolFlag{
-				Name:    "info",
-				Aliases: []string{"i"},
-				Usage:   "print format info and exit without decoding",
-			},
-			&cli.BoolFlag{
-				Name:  "raw",
-				Usage: "output raw PCM instead of WAV",
-			},
-			&cli.IntFlag{
-				Name:  "dsd-rate",
-				Value: 0,
-				Usage: "DSD output PCM sample rate (44100, 88200, 176400, 352800, 705600); 0 auto-selects",
-			},
-		},
-		Action: runDecode,
-	}
+type decodeCmd struct {
+	File string `arg:"" help:"audio file to decode"`
+
+	Output   string `default:"-"                                        help:"output file path (- for stdout)"                                                   short:"o"`
+	BitDepth int    `default:"0"                                        help:"force output bit depth (16, 24, 32); 0 preserves native"                           short:"b"`
+	Info     bool   `help:"print format info and exit without decoding" short:"i"`
+	Raw      bool   `help:"output raw PCM instead of WAV"`
+	DSDRate  int    `default:"0"                                        help:"DSD output PCM sample rate (44100, 88200, 176400, 352800, 705600); 0 auto-selects" name:"dsd-rate"`
 }
 
-func runDecode(_ context.Context, cmd *cli.Command) error {
-	if cmd.NArg() != 1 {
-		return fmt.Errorf("%w: got %d", errInvalidArgCount, cmd.NArg())
-	}
-
-	path := cmd.Args().First()
+// Run decodes the file.
+func (cmd *decodeCmd) Run() error {
+	path := cmd.File
 
 	raw, err := os.Open(path) // #nosec G304 -- CLI tool opens user-specified audio files
 	if err != nil {
@@ -120,7 +84,7 @@ func runDecode(_ context.Context, cmd *cli.Command) error {
 	case detect.AIFF:
 		return decodeAndOutput(cmd, "AIFF", file, newAIFFDecoder)
 	case detect.DSF, detect.DFF:
-		outputRate, rateErr := dsdOutputRate(file, cmd.Int("dsd-rate"))
+		outputRate, rateErr := dsdOutputRate(file, cmd.DSDRate)
 		if rateErr != nil {
 			return rateErr
 		}
@@ -305,7 +269,7 @@ func autoDSDRate(input dsd.InputRate) dsd.OutputRate {
 	}
 }
 
-func decodeAndOutput(cmd *cli.Command, codecName string, rs io.ReadSeeker, factory decoderFactory) error {
+func decodeAndOutput(cmd *decodeCmd, codecName string, rs io.ReadSeeker, factory decoderFactory) error {
 	dec, err := factory(rs)
 	if err != nil {
 		return fmt.Errorf("decoding %s: %w", codecName, err)
@@ -317,7 +281,7 @@ func decodeAndOutput(cmd *cli.Command, codecName string, rs io.ReadSeeker, facto
 
 	format := dec.Format()
 
-	if cmd.Bool("info") {
+	if cmd.Info {
 		_, _ = fmt.Fprintf(os.Stderr, "codec:       %s\n", codecName)
 		_, _ = fmt.Fprintf(os.Stderr, "sample rate: %d Hz\n", format.SampleRate)
 
@@ -332,7 +296,7 @@ func decodeAndOutput(cmd *cli.Command, codecName string, rs io.ReadSeeker, facto
 		return nil
 	}
 
-	requestedDepth := cmd.Int("bit-depth")
+	requestedDepth := cmd.BitDepth
 	if requestedDepth > 0 && saprobe.BitDepth(requestedDepth) != format.BitDepth {
 		return fmt.Errorf(
 			"native is %d-bit, requested %d-bit: %w",
@@ -340,8 +304,8 @@ func decodeAndOutput(cmd *cli.Command, codecName string, rs io.ReadSeeker, facto
 		)
 	}
 
-	if cmd.Bool("raw") {
-		return streamPCM(cmd.String(flagOutput), dec)
+	if cmd.Raw {
+		return streamPCM(cmd.Output, dec)
 	}
 
 	// WAV output requires total size upfront — slurp all decoded PCM.
@@ -350,7 +314,7 @@ func decodeAndOutput(cmd *cli.Command, codecName string, rs io.ReadSeeker, facto
 		return fmt.Errorf("decoding %s: %w", codecName, err)
 	}
 
-	return writeWAV(cmd.String(flagOutput), pcm, format)
+	return writeWAV(cmd.Output, pcm, format)
 }
 
 func streamPCM(output string, r io.Reader) error {

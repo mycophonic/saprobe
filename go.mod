@@ -3,6 +3,7 @@ module github.com/mycophonic/saprobe
 go 1.26.0
 
 require (
+	github.com/alecthomas/kong v1.16.1
 	github.com/containerd/nerdctl/mod/tigron v0.0.0-20260212081135-61a62f37ccbf
 	github.com/jfreymuth/oggvorbis v1.0.5
 	github.com/mycophonic/agar v0.1.6
@@ -11,7 +12,6 @@ require (
 	github.com/mycophonic/saprobe-dsd v1.0.0-rc1
 	github.com/mycophonic/saprobe-flac v1.0.0-rc2
 	github.com/mycophonic/saprobe-mp3 v0.1.0
-	github.com/urfave/cli/v3 v3.6.2
 )
 
 require (

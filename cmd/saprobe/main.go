@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/urfave/cli/v3"
+	"github.com/alecthomas/kong"
 
 	"github.com/mycophonic/primordium/app"
 	"github.com/mycophonic/primordium/app/shutdown"
@@ -34,26 +34,47 @@ const name = "saprobe"
 // exempts the name for this use.
 var version = "dev"
 
+type cli struct {
+	Version kong.VersionFlag `help:"Print the version and exit." short:"v"`
+
+	Decode decodeCmd `cmd:"" help:"Decode audio file to WAV (or raw PCM with --raw)"`
+	Encode encodeCmd `cmd:"" help:"Encode raw PCM to FLAC"`
+}
+
 func main() {
-	appl := &cli.Command{
-		Name:    name,
-		Usage:   "Audio decoding cli (AIFF, ALAC, FLAC, DSD, AAC, MP3, OGG, WAV)",
-		Version: version,
-		Commands: []*cli.Command{
-			decodeCommand(),
-			encodeCommand(),
-		},
+	var flags cli
+
+	// Parse and usage errors are kong's, printed with the usage before anything
+	// runs; every failure exits 1, and --help and --version exit 0.
+	parser := kong.Must(&flags,
+		kong.Name(name),
+		kong.Description("Audio decoding cli (AIFF, ALAC, FLAC, DSD, AAC, MP3, OGG, WAV)"),
+		kong.Vars{"version": name + " version " + version},
+		kong.UsageOnError(),
+		kong.Exit(func(code int) {
+			if code != 0 {
+				code = 1
+			}
+
+			os.Exit(code)
+		}),
+	)
+
+	// No command shows the help and succeeds, as the command did before kong,
+	// which would otherwise report the missing command as an error.
+	args := os.Args[1:]
+	if len(args) == 0 {
+		args = []string{"--help"}
 	}
 
-	// urfave/cli exits the process itself for its own errors; shutdown.Exit runs
-	// the handlers first.
-	cli.OsExiter = shutdown.Exit //nolint:reassign // cli.OsExiter is the package's documented hook for the exit
+	parsed, err := parser.Parse(args)
+	parser.FatalIfErrorf(err)
 
 	// app.Main runs the command on a context a shutdown signal cancels, then the
 	// handlers, and exits: 0 on nil, the asked status on an ExitError, which it
 	// does not log; the error is printed here, once.
-	app.Main(&app.Options{Name: name, Version: version}, func(ctx context.Context) error {
-		if err := appl.Run(ctx, os.Args); err != nil {
+	app.Main(&app.Options{Name: name, Version: version}, func(context.Context) error {
+		if err := parsed.Run(); err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 
 			return shutdown.ExitError(1)
