@@ -22,7 +22,7 @@ golangci:
               - github.com/mycophonic/saprobe-flac
               - github.com/mycophonic/saprobe-mp3
               - github.com/jfreymuth/oggvorbis # the OggVorbis decoder
-              - github.com/urfave/cli/v3 # the command line
+              - github.com/alecthomas/kong # the command line
               - github.com/mycophonic/agar # tests: reference decoders and defective audio
               - github.com/containerd/nerdctl/mod/tigron # tests: the command-line test harness
     exclusions:

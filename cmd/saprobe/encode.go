@@ -17,11 +17,8 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
-
-	"github.com/urfave/cli/v3"
 
 	"github.com/mycophonic/primordium/filesystem/iox"
 	flac "github.com/mycophonic/saprobe-flac"
@@ -29,47 +26,18 @@ import (
 	"github.com/mycophonic/saprobe"
 )
 
-func encodeCommand() *cli.Command {
-	return &cli.Command{
-		Name:      "encode",
-		Usage:     "Encode raw PCM to FLAC",
-		ArgsUsage: "<file>",
-		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:    "output",
-				Aliases: []string{"o"},
-				Value:   "-",
-				Usage:   "output file path (- for stdout)",
-			},
-			&cli.IntFlag{
-				Name:     "sample-rate",
-				Aliases:  []string{"r"},
-				Required: true,
-				Usage:    "sample rate in Hz",
-			},
-			&cli.IntFlag{
-				Name:     "bit-depth",
-				Aliases:  []string{"b"},
-				Required: true,
-				Usage:    "bit depth (4, 8, 12, 16, 20, 24, 32)",
-			},
-			&cli.IntFlag{
-				Name:     "channels",
-				Aliases:  []string{"c"},
-				Required: true,
-				Usage:    "number of channels (1-8)",
-			},
-		},
-		Action: runEncode,
-	}
+type encodeCmd struct {
+	File string `arg:"" help:"raw PCM file to encode"`
+
+	Output     string `default:"-"                                 help:"output file path (- for stdout)" short:"o"`
+	SampleRate int    `help:"sample rate in Hz"                    required:"true"                        short:"r"`
+	BitDepth   int    `help:"bit depth (4, 8, 12, 16, 20, 24, 32)" required:"true"                        short:"b"`
+	Channels   int    `help:"number of channels (1-8)"             required:"true"                        short:"c"`
 }
 
-func runEncode(_ context.Context, cmd *cli.Command) error {
-	if cmd.NArg() != 1 {
-		return fmt.Errorf("%w: got %d", errInvalidArgCount, cmd.NArg())
-	}
-
-	path := cmd.Args().First()
+// Run encodes the file.
+func (cmd *encodeCmd) Run() error {
+	path := cmd.File
 
 	pcm, err := os.ReadFile(path) // #nosec G304 -- CLI tool reads user-specified audio files.
 	if err != nil {
@@ -77,19 +45,19 @@ func runEncode(_ context.Context, cmd *cli.Command) error {
 	}
 
 	bitDepth, err := saprobe.ToBitDepth(
-		uint8(cmd.Int("bit-depth")), // #nosec G115 -- CLI value validated by ToBitDepth.
+		uint8(cmd.BitDepth), // #nosec G115 -- CLI value validated by ToBitDepth.
 	)
 	if err != nil {
 		return fmt.Errorf("invalid bit depth: %w", err)
 	}
 
 	format := flac.PCMFormat{
-		SampleRate: cmd.Int("sample-rate"),
+		SampleRate: cmd.SampleRate,
 		BitDepth:   flac.BitDepth(bitDepth),
-		Channels:   uint(cmd.Int("channels")),
+		Channels:   uint(cmd.Channels),
 	}
 
-	output := cmd.String("output")
+	output := cmd.Output
 	if output == "-" {
 		if err = flac.Encode(os.Stdout, pcm, format); err != nil {
 			return fmt.Errorf("encoding: %w", err)
