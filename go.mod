@@ -7,7 +7,7 @@ require (
 	github.com/containerd/nerdctl/mod/tigron v0.0.0-20260212081135-61a62f37ccbf
 	github.com/jfreymuth/oggvorbis v1.0.5
 	github.com/mycophonic/agar v0.1.6
-	github.com/mycophonic/primordium v0.15.0
+	github.com/mycophonic/primordium v0.15.1
 	github.com/mycophonic/saprobe-alac v1.0.0-rc2
 	github.com/mycophonic/saprobe-dsd v1.0.0-rc1
 	github.com/mycophonic/saprobe-flac v1.0.0-rc2
