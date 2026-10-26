@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/alecthomas/kong v1.16.1
-	github.com/containerd/nerdctl/mod/tigron v0.0.0-20260212081135-61a62f37ccbf
+	github.com/containerd/nerdctl/mod/tigron v0.0.0-20261021182728-127dce535ff2
 	github.com/jfreymuth/oggvorbis v1.0.5
 	github.com/mycophonic/agar v0.1.6
 	github.com/mycophonic/primordium v0.15.0

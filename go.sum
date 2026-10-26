@@ -4,8 +4,8 @@ github.com/alecthomas/kong v1.16.1 h1:ixhCt93XkJ98kGposQ54+bl0IK6XwqB40AsMynU7Z8
 github.com/alecthomas/kong v1.16.1/go.mod h1:wrlbXem1CWqUV5Vbmss5ISYhsVPkBb1Yo7YKJghju2I=
 github.com/alecthomas/repr v0.5.2 h1:SU73FTI9D1P5UNtvseffFSGmdNci/O6RsqzeXJtP0Qs=
 github.com/alecthomas/repr v0.5.2/go.mod h1:Fr0507jx4eOXV7AlPV6AVZLYrLIuIeSOWtW57eE/O/4=
-github.com/containerd/nerdctl/mod/tigron v0.0.0-20260212081135-61a62f37ccbf h1:fs2wE/ms3LLU/EoAtFcKy/VXedQhxwAKm7v3xY/TWow=
-github.com/containerd/nerdctl/mod/tigron v0.0.0-20260212081135-61a62f37ccbf/go.mod h1:gmUZh2wUVxr/msGogKUi6v9eJbP5ASO4fVYEPzHH4iI=
+github.com/containerd/nerdctl/mod/tigron v0.0.0-20261021182728-127dce535ff2 h1:rQMT9Ob2w+Nf49pwHsBN0kbgAQ+3SJH3cXrl8STC5e8=
+github.com/containerd/nerdctl/mod/tigron v0.0.0-20261021182728-127dce535ff2/go.mod h1:gmUZh2wUVxr/msGogKUi6v9eJbP5ASO4fVYEPzHH4iI=
 github.com/creack/pty v1.1.24 h1:bJrF4RRfyJnbTJqzRLHzcGaZK1NeM5kTC9jGgovnR1s=
 github.com/creack/pty v1.1.24/go.mod h1:08sCNb52WyoAwi2QDyzUCTgcvVFhUzewun7wtTfvcwE=
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1VwoXQT9A3Wy9MM3WgvqSxFWenqJduM=
