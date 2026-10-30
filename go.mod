@@ -8,7 +8,7 @@ require (
 	github.com/jfreymuth/oggvorbis v1.0.5
 	github.com/mycophonic/agar v0.1.6
 	github.com/mycophonic/primordium v0.15.1
-	github.com/mycophonic/saprobe-alac v1.0.0-rc2
+	github.com/mycophonic/saprobe-alac v1.0.0-rc3
 	github.com/mycophonic/saprobe-dsd v1.0.0-rc1
 	github.com/mycophonic/saprobe-flac v1.0.0-rc2
 	github.com/mycophonic/saprobe-mp3 v0.1.0

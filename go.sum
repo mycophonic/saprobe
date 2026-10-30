@@ -44,8 +44,8 @@ github.com/mycophonic/flac v1.0.0-rc2 h1:cn/IdrOo0dDIZRjenmjEeCqoDZOBp4WZ9cv9Pkp
 github.com/mycophonic/flac v1.0.0-rc2/go.mod h1:0/VOUwjtgl71aLm//qS4RXAUq0u2nUJm4i5QZsyMark=
 github.com/mycophonic/primordium v0.15.1 h1:Nh4IGRzbLr8rXxOaImX40P9HouHW0cbgrYatf0ps7rI=
 github.com/mycophonic/primordium v0.15.1/go.mod h1:o/fQjAj8b4OCW+UZfZBDuC3WBYRnOyx2bWv62qV3Rko=
-github.com/mycophonic/saprobe-alac v1.0.0-rc2 h1:BSlq7JiaUx9oRW/XQXl5u1kvR0Fiw7oXnyj7cxP/cNQ=
-github.com/mycophonic/saprobe-alac v1.0.0-rc2/go.mod h1:yjOAeNBvNLFClm5CVimsh375RNMjX1FcTYitqYOJh54=
+github.com/mycophonic/saprobe-alac v1.0.0-rc3 h1:n9YqGsPf6IrbH9sW3mrcdZdBXLpzM1uIyA+4JBjXzIc=
+github.com/mycophonic/saprobe-alac v1.0.0-rc3/go.mod h1:UOUpQgacxLxG0VAWI2SFe8JA8ntxVb7MnhfG8/zdP84=
 github.com/mycophonic/saprobe-dsd v1.0.0-rc1 h1:YVsxzVeR8ax/5SdncFtBclagzdqc3xm9wBAVXax0yCc=
 github.com/mycophonic/saprobe-dsd v1.0.0-rc1/go.mod h1:EhjhlFU4FCuILiNhvsTSPyFXcpg87MfBGRKtSvnoQj4=
 github.com/mycophonic/saprobe-flac v1.0.0-rc2 h1:FfT0LqkLwFpzxDkmVpymxHM+oHGHDnYhkOSmWtwXK2w=
