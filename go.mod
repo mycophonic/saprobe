@@ -3,7 +3,7 @@ module github.com/mycophonic/saprobe
 go 1.26.0
 
 require (
-	github.com/alecthomas/kong v1.16.1
+	github.com/alecthomas/kong v1.17.0
 	github.com/containerd/nerdctl/mod/tigron v0.0.0-20261021182728-127dce535ff2
 	github.com/jfreymuth/oggvorbis v1.0.5
 	github.com/mycophonic/agar v0.1.6
